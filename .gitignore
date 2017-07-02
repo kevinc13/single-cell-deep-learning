@@ -1,0 +1,22 @@
+.DS_Store
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+
+# Ignore large data files
+data/**
+MNIST_data/
+
+# ... but include R scripts
+!data/*
+!data/**/*.R
+
+# Exclude these files
+data/**/.Rhistory
+data/**/.DS_Store
+
+# Ignore results
+results/*
+
+# JetBrains IDE
+.idea/
