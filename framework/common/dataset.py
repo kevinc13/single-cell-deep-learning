@@ -2,6 +2,8 @@ from __future__ import (
     absolute_import, division, print_function, unicode_literals
 )
 
+from .util import shuffle_in_unison
+from .util import to_one_hot as convert_to_one_hot
 import numpy as np
 
 
@@ -38,7 +40,7 @@ class Dataset:
         assert(features.shape[0] == labels.shape[0])
         self._features = features if not flatten else features.reshape(
             (features.shape[0], -1), order="F")
-        self._labels = labels if not to_one_hot else self.to_one_hot(
+        self._labels = labels if not to_one_hot else convert_to_one_hot(
             np.squeeze(labels).astype(int))
 
         self._num_examples = features.shape[0]
@@ -57,34 +59,9 @@ class Dataset:
     def num_examples(self):
         return self._num_examples
 
-    def to_one_hot(self, vector):
-        """
-        Converts vector of values into one-hot array
-
-        Args:
-            vector: Numpy array/vector
-
-        Returns:
-            Numpy array of one-hot encoded values
-        """
-
-        # Get number of classes from max value in vector
-        num_classes = np.max(vector) + 1
-
-        # Create array of zeros
-        result = np.zeros(shape=(vector.shape[0], num_classes))
-
-        # Set appropriate values to 1
-        result[np.arange(vector.shape[0]), vector] = 1
-
-        # Return as integer NumPy array
-        return result.astype(int)
-
     def shuffle(self):
-        permutation = np.arange(self._num_examples)
-        np.random.shuffle(permutation)
-        self._features = self._features[permutation]
-        self._labels = self._labels[permutation]
+        self._features, self._labels = shuffle_in_unison(
+            self._features, self._labels)
 
     def next_batch(self, batch_size):
         """
@@ -120,3 +97,9 @@ class Dataset:
         end = self._index_in_epoch
 
         return (self._features[start:end], self._labels[start:end])
+
+    @staticmethod
+    def concatenate(*datasets, **kwargs):
+        all_features = np.vstack(tuple([d.features for d in datasets]))
+        all_labels = np.vstack(tuple([d.labels for d in datasets]))
+        return Dataset(all_features, all_labels, **kwargs)

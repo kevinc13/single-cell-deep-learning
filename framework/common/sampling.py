@@ -1,20 +1,39 @@
 import numpy as np
 
 from .dataset import Dataset
+from .util import shuffle_in_unison, percentage_split
+
+
+def log_uniform_sample(a, b):
+    x = np.random.uniform(low=0.0, high=1.0)
+    return 10**((log10(b) - log10(a))*x + log10(a))
+
+
+def sqrt_uniform_sample(a, b):
+    x = np.random.uniform(low=0.0, high=1.0)
+    return (b - a) * sqrt(x) + a
+
 
 def stratified_sample(features,
                       labels,
-                      prop_train=0.8,
+                      proportions=[],
                       convert_labels_to_int=False):
+    # Randomize dataset
+    features, labels = shuffle_in_unison(features, labels)
+
     if convert_labels_to_int:
         strata, int_labels = np.unique(labels, return_inverse=True)
     else:
         strata = np.unique(labels)
 
-    train_features = []
-    train_labels = []
-    test_features = []
-    test_labels = []
+    folds = [] # [(features1, labels1), (features2, labels2), ...]
+
+    for i in range(len(proportions)):
+        folds.append({
+                "features": [],
+                "labels": []
+            })
+
     for s in strata:
         stratum_idx = labels == s
         stratum_features = features[stratum_idx,]
@@ -24,26 +43,32 @@ def stratified_sample(features,
         else:
             stratum_labels = labels[stratum_idx,]
 
-        n_examples = stratum_features.shape[0]
-        train_idx = np.random.choice(
-            n_examples,
-            size=math.ceil(prop_train * n_examples),
-            replace=False)
-        test_idx = [x for x in range(n_examples) if x not in train_idx]
+        fold_indexes = percentage_split(
+            np.arange(stratum_features.shape[0]), proportions)
 
-        train_features = train_features + \
-            stratum_features[train_idx,].tolist()
-        train_labels = train_labels + stratum_labels[train_idx,].tolist()
+        for i in range(len(proportions)):
+            fold_idx = fold_indexes[i]
 
-        test_features = test_features + stratum_features[test_idx,].tolist()
-        test_labels = test_labels + stratum_labels[test_idx,].tolist()
+            folds[i]["features"] = folds[i]["features"] + \
+                stratum_features[fold_idx,].tolist()
+            folds[i]["labels"] = folds[i]["labels"] + \
+                stratum_labels[fold_idx,].tolist()
 
-    train_dataset = Dataset(
-        np.array(train_features), np.array(train_labels), to_one_hot=True)
-    test_dataset = Dataset(
-        np.array(test_features), np.array(test_labels), to_one_hot=True)
+    datasets = []
+    for fold in folds:
+        dataset = Dataset(
+            np.array(fold["features"]), 
+            np.array(fold["labels"]), 
+            to_one_hot=True)
+        dataset.shuffle()
+        datasets.append(dataset)
 
-    train_dataset.shuffle()
-    test_dataset.shuffle()
+    return datasets
 
-    return train_dataset, test_dataset
+def stratified_kfold(
+        features, labels, n_folds=10, convert_labels_to_int=False):
+    proportions = [1.0 / n_folds] * n_folds
+    print(proportions)
+    return stratified_sample(
+        features, labels,
+        proportions, convert_labels_to_int)

@@ -143,8 +143,6 @@ class VariationalAutoencoder(BaseModel):
             loss=self._loss,
             metrics=self.config["metrics"])
 
-        print(self.keras_model.summary())
-
     def _sample(self, args):
         mean, log_var = args
         epsilon = K.random_normal(
@@ -168,6 +166,11 @@ class VariationalAutoencoder(BaseModel):
                                 validation_dataset.features,
                                 validation_dataset.features
                             ))
+
+    def evaluate(self, valid_dataset, batch_size=100):
+        return self.keras_model.evaluate(
+            valid_dataset.features, valid_dataset.features,
+            batch_size=batch_size, verbose=1)
 
     def encode(self, x, batch_size=100):
         return self.encoder_model.predict(

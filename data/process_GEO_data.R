@@ -18,14 +18,67 @@ colnames(pdata) <- c("tumor_id", "malignant", "non_malignant_cell_type")
 pdata <- AnnotatedDataFrame(pdata)
 
 edata <- as.matrix(melanoma_cells.TPM[4:nrow(melanoma_cells.TPM),])
+# Un-log transform original data
+edata <- 2^edata - 1
 
-melanoma_cells.TPM.eset <- newSCESet(tpmData=edata,
-                                     phenoData=pdata)
+melanoma_cells.TPM.sceset <- newSCESet(tpmData=edata,
+                                       phenoData=pdata,
+                                       logExprsOffset = 1)
+melanoma_cells.TPM.sceset <- calculateQCMetrics(melanoma_cells.TPM.sceset)
+
 remove(pdata)
 remove(edata)
 remove(melanoma_cells.TPM)
 
-saveRDS(melanoma_cells.TPM.eset, "GSE72056_Melanoma/original/melanoma_cells.TPM.eset.rds")
+melanoma_cells.TPM.sceset$malignant <- factor(melanoma_cells.TPM.sceset$malignant)
+levels(melanoma_cells.TPM.sceset$malignant) <- c("unresolved", "no", "yes")
+
+melanoma_cells.TPM.sceset$non_malignant_cell_type <- 
+    factor(melanoma$non_malignant_cell_type)
+levels(melanoma_cells.TPM.sceset$non_malignant_cell_type) <- c("unresolved", "T", "B", 
+                                                               "Macro", "Endothelial",
+                                                               "CAF", "NK")
+
+saveRDS(melanoma_cells.TPM.sceset, "GSE72056_Melanoma/original/melanoma_cells.TPM.rds")
+remove(melanoma_cells.TPM.sceset)
+
+# melanoma <- readRDS("GSE72056_Melanoma/original/melanoma_cells.TPM.rds")
+
+### ---------- Parameters ---------- ###
+n_genes <- 500
+
+### ---------- Gene Filtering ---------- ###
+melanoma.processed <- melanoma
+
+# Filter out dropout genes
+low_exp.filter <- rowSums(tpm(melanoma.processed) == 0) > (ncol(melanoma.processed) * 0.9)
+melanoma.processed <- melanoma.processed[!low_exp.filter,]
+
+### ---------- Select Most Variable Genes ---------- ###
+library(e1071)
+exprs <- exprs(melanoma.processed[,melanoma$non_malignant_cell_type != "unresolved"])
+
+genes_sd <- apply(exprs, 1, sd, na.rm=TRUE)
+genes_mean <- rowMeans(exprs, na.rm=TRUE)
+genes_cv <- genes_sd/genes_mean
+
+mean_cv_model <- svm(log2(genes_cv) ~ log2(genes_mean))
+predicted_log2cv <- predict(mean_cv_model, genes_mean)
+gene_scores <- log2(genes_cv) - predicted_log2cv
+
+var.filter <- names(sort(gene_scores, decreasing=TRUE)[1:n_genes])
+
+melanoma.processed <- melanoma.processed[var.filter,]
+
+rm(var.filter)
+rm(exprs)
+rm(genes_sd)
+rm(genes_mean)
+rm(genes_cv)
+rm(mean_cv_model)
+rm(predicted_log2cv)
+
+plotTSNE(melanoma.processed, colour_by="non_malignant_cell_type")
 
 #### GSE81861: Colorectal cancer dataset ####
 crc_tumor_cells.FPKM <- fread("GSE81861_CRC/GSE81861_CRC_tumor_all_cells_FPKM.csv",

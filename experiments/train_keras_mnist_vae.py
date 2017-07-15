@@ -38,6 +38,7 @@ class Experiment(BaseExperiment):
             "input_size": 784,
             "encoder_layers": [
                 "Dense:128:activation='relu'",
+                "BatchNormalization",
                 "Dense:64:activation='relu'"
             ],
             "latent_size": 10,
@@ -50,3 +51,9 @@ class Experiment(BaseExperiment):
         vae = VAE(model_config)
         vae.train(train_dataset, epochs=1, batch_size=100,
                   validation_dataset=test_dataset)
+
+        latent_reps = vae.encode(test_dataset.features)
+        
+        results = np.hstack((latent_reps,
+            np.expand_dims(test_dataset.labels, axis=1)))
+
