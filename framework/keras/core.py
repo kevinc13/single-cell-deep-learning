@@ -1,3 +1,7 @@
+from __future__ import (
+    absolute_import, division, print_function, unicode_literals
+)
+
 import copy, json
 import tensorflow as tf
 from keras import backend as K
@@ -57,7 +61,7 @@ class BaseModel(object):
         if self.model_dir is not None:
             self.callbacks.append(ModelCheckpoint(
                 self.model_dir + "/keras_model.weights.h5",
-                monitor="val_loss", verbose=1,
+                monitor="val_loss", verbose=0,
                 save_best_only=True, save_weights_only=True))
             self.callbacks.append(FileLogger(
                 self.model_dir + "/training.log", append=True))

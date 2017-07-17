@@ -1,3 +1,7 @@
+from __future__ import (
+    absolute_import, division, print_function, unicode_literals
+)
+
 import numpy as np
 
 from .dataset import Dataset
@@ -68,7 +72,6 @@ def stratified_sample(features,
 def stratified_kfold(
         features, labels, n_folds=10, convert_labels_to_int=False):
     proportions = [1.0 / n_folds] * n_folds
-    print(proportions)
     return stratified_sample(
         features, labels,
         proportions, convert_labels_to_int)

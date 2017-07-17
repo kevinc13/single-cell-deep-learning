@@ -1,5 +1,10 @@
+from __future__ import (
+    absolute_import, division, print_function, unicode_literals
+)
+
 import os
 import sys
+import six
 import csv
 import logging
 import numpy as np
@@ -42,7 +47,7 @@ class BaseExperiment(object):
 
             self.logger.addHandler(console_handler)
 
-    def run(self):
+    def run(self, debug=False):
         raise Exception("The experiment must implement the run method")
 
     def create_dir(self, dir):
@@ -63,6 +68,8 @@ class BaseExperiment(object):
     def save_data_table(self, data, filepath, root=None, delimiter="\t"):
         if root is not None:
             filepath = root + "/" + filepath
+
+        delimiter = str(delimiter) if six.PY2 else delimiter
 
         with open(filepath, "w") as f:
             writer = csv.writer(

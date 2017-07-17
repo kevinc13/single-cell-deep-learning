@@ -1,3 +1,7 @@
+from __future__ import (
+    absolute_import, division, print_function, unicode_literals
+)
+
 import keras.backend as K
 from keras.models import Sequential, Model
 from keras.layers import (
@@ -85,7 +89,7 @@ class VariationalAutoencoder(BaseModel):
             decoder_layer_defs = self.config["decoder_layers"]
         else:
             decoder_layer_defs = list(reversed(encoder_layer_defs))
-        
+
         self.x = Input(
             shape=(self.config["input_size"],))
 
@@ -128,10 +132,10 @@ class VariationalAutoencoder(BaseModel):
                 self.generator_layers.append(layer(self.generator_layers[-1]))
 
         self.reconstructions = Dense(
-                self.config["input_size"], activation="sigmoid"
+            self.config["input_size"], activation="sigmoid"
             )(self.decoder_layers[-1])
         self.generator_output = Dense(
-                self.config["input_size"], activation="sigmoid"
+            self.config["input_size"], activation="sigmoid"
             )(self.generator_layers[-1])
 
         self.keras_model = Model(self.x, self.reconstructions)
@@ -147,7 +151,7 @@ class VariationalAutoencoder(BaseModel):
         mean, log_var = args
         epsilon = K.random_normal(
             shape=(K.shape(self.x)[0], self.latent_size), mean=0., stddev=1)
-        return mean + K.exp(self.z_log_var / 2) * epsilon
+        return mean + K.exp(log_var / 2) * epsilon
 
     def _loss(self, y_true, y_pred):
         reconstruction_error = binary_crossentropy(y_pred, y_true)
@@ -156,27 +160,27 @@ class VariationalAutoencoder(BaseModel):
             axis=-1)
         return reconstruction_error + kl_divergence
 
-    def train(self, train_dataset, 
+    def train(self, train_dataset,
               epochs=50, batch_size=100,
               validation_dataset=None):
         self.keras_model.fit(train_dataset.features, train_dataset.features,
                              batch_size=batch_size, epochs=epochs,
                              shuffle=True, callbacks=self.callbacks,
                              verbose=2, validation_data=(
-                                validation_dataset.features,
-                                validation_dataset.features
-                            ))
+                                 validation_dataset.features,
+                                 validation_dataset.features
+                             ))
 
     def evaluate(self, valid_dataset, batch_size=100):
         return self.keras_model.evaluate(
             valid_dataset.features, valid_dataset.features,
-            batch_size=batch_size, verbose=1)
+            batch_size=batch_size, verbose=0)
 
     def encode(self, x, batch_size=100):
         return self.encoder_model.predict(
-            x, batch_size=batch_size, verbose=1)
+            x, batch_size=batch_size, verbose=0)
 
     def generate(self, z, batch_size=100):
         return self.generator_model.predict(
-            z, batch_size=batch_size, verbose=1)
+            z, batch_size=batch_size, verbose=0)
 

@@ -1,3 +1,7 @@
+from __future__ import (
+    absolute_import, division, print_function, unicode_literals
+)
+
 import os, six, time, csv
 from collections import OrderedDict, Iterable
 
@@ -34,7 +38,7 @@ class FileLogger(Callback):
         self.append = append
         self.append_header = True
         self.writer = None
-        self.delimiter = delimiter
+        self.delimiter = str(delimiter)
         self.file_flags = "b" if six.PY2 and os.name == "nt" else ""
         super(FileLogger, self).__init__()
 
@@ -60,9 +64,11 @@ class FileLogger(Callback):
         if not self.writer:
             self.keys = sorted(logs.keys())
 
-            class CustomDialect(csv.unix_dialect):
+            class CustomDialect(csv.Dialect):
                 delimiter = self.delimiter
                 quoting = csv.QUOTE_MINIMAL
+                quotechar = str('"')
+                lineterminator = "\n"
 
             self.writer = csv.DictWriter(
                 self.file, fieldnames=['epoch'] + self.keys,
