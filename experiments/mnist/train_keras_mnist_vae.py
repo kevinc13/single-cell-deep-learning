@@ -12,8 +12,9 @@ import matplotlib.pyplot as plt
 
 class Experiment(BaseExperiment):
 
-    def __init__(self):
-        self.experiment_name = "test_keras_mnist_vae"
+    def __init__(self, debug=False):
+        self.experiment_name = "train_keras_mnist_vae"
+        self.debug = debug
         super(Experiment, self).__init__()
 
     def run(self):
@@ -36,24 +37,47 @@ class Experiment(BaseExperiment):
             "model_dir": model_dir,
 
             "input_size": 784,
+            "bernoulli": True,
             "encoder_layers": [
-                "Dense:128:activation='relu'",
-                "BatchNormalization",
-                "Dense:64:activation='relu'"
+                "Dense:256:activation='relu'"
             ],
-            "latent_size": 10,
+            "latent_size": 2,
 
-            "loss": "binary_crossentropy",
-            "optimizer": "adam",
-            "metrics": []
+            "n_warmup_epochs": 5,
+            "optimizer": "adam"
         }
+
+        if self.debug:
+            epochs = 5
+        else:
+            epochs = 50
         
         vae = VAE(model_config)
-        vae.train(train_dataset, epochs=1, batch_size=100,
+        vae.train(train_dataset, epochs=epochs, batch_size=100,
                   validation_dataset=test_dataset)
 
         latent_reps = vae.encode(test_dataset.features)
-        
-        results = np.hstack((latent_reps,
-            np.expand_dims(test_dataset.labels, axis=1)))
+
+        results = np.hstack((
+            latent_reps, 
+            np.expand_dims(test_dataset.labels, axis=1)
+        ))
+
+        header = []
+        for l in range(1, model_config["latent_size"] + 1):
+            header.append("dim{}".format(l))
+        header.append("digit")
+        header = np.array(header)
+
+        results = np.vstack((header, results))
+
+        self.logger.info("Saving results")
+        self.save_data_table(
+            results,
+            model_config["model_dir"] + "/latent_representations.txt")
+
+        plt.figure(figsize=(6, 6))
+        plt.scatter(latent_reps[:, 0], latent_reps[:, 1], c=y_test)
+        plt.colorbar()
+        plt.show()
 

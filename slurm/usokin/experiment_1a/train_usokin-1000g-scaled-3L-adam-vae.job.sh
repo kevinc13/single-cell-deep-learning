@@ -19,4 +19,4 @@ module load keras/2.0.4
 # Activate TensorFlow virtualenv
 source $KERAS_ENV/bin/activate
 
-python main.py --e "train_2layer_mouse_neuronal_cell_vae"
+python main.py --e "train_usokin-1000g-scaled-3L-adam-vae"

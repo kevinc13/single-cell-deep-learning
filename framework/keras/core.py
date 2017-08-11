@@ -7,7 +7,7 @@ import tensorflow as tf
 from keras import backend as K
 from keras.models import model_from_json
 from keras.callbacks import (
-    ModelCheckpoint, EarlyStopping
+    ModelCheckpoint, EarlyStopping, TensorBoard, TerminateOnNaN
 )
 from .callbacks import (
     TimeLogger, FileLogger
@@ -28,9 +28,7 @@ class BaseModel(object):
         self.config = copy.deepcopy(config)
 
         # Session management
-        K.clear_session()
-        self.sess = tf.Session()
-        K.set_session(self.sess)
+        BaseModel.reset_session()
 
         # Define core model attributes
         self.name = self.config["name"] if "name" in self.config else "Model"
@@ -56,16 +54,23 @@ class BaseModel(object):
         pass
 
     def _setup_default_callbacks(self):
-        self.callbacks.append(TimeLogger())
+        if "tensorboard" in self.config and self.config["tensorboard"]:
+            self.callbacks.append(TensorBoard(
+                log_dir=self.model_dir + "/tensorboard",
+                histogram_freq=1,
+                write_graph=True,
+                write_grads=True))
 
         if self.model_dir is not None:
-            self.callbacks.append(ModelCheckpoint(
-                self.model_dir + "/keras_model.weights.h5",
-                monitor="val_loss", verbose=0,
-                save_best_only=True, save_weights_only=True))
+            if "checkpoint" in self.config and self.config["checkpoint"]:
+                self.callbacks.append(ModelCheckpoint(
+                    self.model_dir + "/keras_model.weights.h5",
+                    monitor="val_loss", verbose=0,
+                    save_best_only=True, save_weights_only=True))
+            self.callbacks.append(TimeLogger())
             self.callbacks.append(FileLogger(
                 self.model_dir + "/training.log", append=True))
-
+            
         if "early_stopping_metric" in self.config \
                 and "early_stopping_min_delta" in self.config \
                 and "early_stopping_patience" in self.config:
@@ -73,6 +78,8 @@ class BaseModel(object):
                 monitor=self.config["early_stopping_metric"],
                 min_delta=self.config["early_stopping_min_delta"],
                 patience=self.config["early_stopping_patience"]))
+
+        self.callbacks.append(TerminateOnNaN())
 
     def build(self, graph):
         raise Exception("The model must implement the build method")
@@ -104,3 +111,7 @@ class BaseModel(object):
         config = cls.load_config(model_dir)
         return cls(config, restore=True)
 
+    @staticmethod
+    def reset_session():
+        tf.reset_default_graph()
+        K.clear_session()

@@ -24,8 +24,8 @@ def main(_):
     except ImportError as err:
         sys.exit("Error importing experiment: {}".format(err))
     else:
-        experiment = module.Experiment()
-        experiment.run(debug=run_config["d"])
+        experiment = module.Experiment(debug=run_config["d"])
+        experiment.run()
 
 if __name__ == '__main__':
     tf.app.run()

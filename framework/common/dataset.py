@@ -9,16 +9,24 @@ import numpy as np
 
 class Dataset:
     """ Defines a dataset for use in a ML model"""
-    def __init__(self, features, labels, flatten=False, to_one_hot=False):
+    def __init__(self, 
+                 features,
+                 labels,
+                 sample_data=[],
+                 flatten=False,
+                 to_one_hot=False):
         """
         Initialize a dataset
 
         Args:
             features: Numpy array of 'm' example features
             labels: Numpy array of 'm' example labels
+            sample_data...: Extra Numpy arrays that contain information
+                         about the samples
             flatten: Whether or not to flatten features into [m x n] array
             to_one_hot: Whether or not to convert labels into array of
-                               one-hot vectors
+                        one-hot vectors
+            
 
         Usage:
             import numpy as np
@@ -42,6 +50,7 @@ class Dataset:
             (features.shape[0], -1), order="F")
         self._labels = labels if not to_one_hot else convert_to_one_hot(
             np.squeeze(labels).astype(int))
+        self._sample_data = sample_data
 
         self._num_examples = features.shape[0]
         self._epoch_count = 0
@@ -59,9 +68,14 @@ class Dataset:
     def num_examples(self):
         return self._num_examples
 
+    @property
+    def sample_data(self):
+        return self._sample_data
+
     def shuffle(self):
-        self._features, self._labels = shuffle_in_unison(
-            self._features, self._labels)
+        self._features, self._labels, self._sample_data = unpack_tuple(
+            shuffle_in_unison(
+                self._features, self._labels, *self._sample_data), 2)
 
     def next_batch(self, batch_size):
         """
@@ -102,4 +116,8 @@ class Dataset:
     def concatenate(*datasets, **kwargs):
         all_features = np.vstack(tuple([d.features for d in datasets]))
         all_labels = np.vstack(tuple([d.labels for d in datasets]))
-        return Dataset(all_features, all_labels, **kwargs)
+        all_sample_data = np.column_stack(
+            tuple([d.sample_data for d in datasets]))
+        return Dataset(
+            all_features, all_labels,
+            sample_data=all_sample_data, **kwargs)

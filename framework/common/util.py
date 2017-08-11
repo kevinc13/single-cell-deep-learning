@@ -3,14 +3,19 @@ from __future__ import (
 )
 
 import numpy as np
+import math
 
 
-def shuffle_in_unison(a, b):
-    permutation = np.arange(a.shape[0])
+def shuffle_in_unison(*arrays):
+    assert(len(arrays) > 0)
+
+    permutation = np.arange(arrays[0].shape[0])
     np.random.shuffle(permutation)
-    a = a[permutation]
-    b = b[permutation]
-    return a, b
+    
+    result = []
+    for a in arrays:
+        result.append(a[permutation])
+    return tuple(result)
 
 
 def percentage_split(data, percentages=[]):
@@ -21,11 +26,17 @@ def percentage_split(data, percentages=[]):
     splits = []
     for p in percentages:
         cum_percentage += p
-        next_idx = int(cum_percentage * size)
+        next_idx = int(math.ceil(cum_percentage * size))
         splits.append(data[prev_idx:next_idx])
         prev_idx = next_idx
     
     return splits
+
+
+def unpack_tuple(data, n=2):
+    for i in range(n):
+        yield data[i]
+    yield data[n:]
 
 def to_one_hot(vector):
         """

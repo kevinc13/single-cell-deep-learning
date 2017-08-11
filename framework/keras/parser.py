@@ -25,7 +25,7 @@ class DefinitionParser:
         
         name = params.pop(0)
         params = dict(
-            (k, float(v)) for k, v in (p.split("=") for p in params))
+            (k, eval(v)) for k, v in (p.split("=") for p in params))
         
         return optimizer_mappings[name](**params)
 

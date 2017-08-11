@@ -48,14 +48,16 @@ saveRDS(usokin, "original/mouse_neuronal_cells.rds")
 usokin <- readRDS("original/mouse_neuronal_cells.rds")
 
 ### ---------- Parameters ---------- ###
-n_genes <- 500
+n_genes <- 100
+standardize <- TRUE
+scale <- FALSE
 
 ### ---------- QC Plots ---------- ###
 # Plot cumulative proportion of library accounted for by top N highest-expressed features
-plot(usokin, block1="pca_major_types", nfeatures=300)
+# plot(usokin, block1="pca_major_types", nfeatures=300)
 
 # Plot QC
-plotQC(usokin, type="highest-expression", exprs_values="fpkm")
+# plotQC(usokin, type="highest-expression", exprs_values="fpkm")
 
 ### ---------- Gene Filtering ---------- ###
 usokin.processed <- usokin
@@ -82,7 +84,7 @@ library(e1071)
 exprs <- exprs(usokin.processed)
 
 # Uncomment if zeroes should be ignored in variability calculations
-# exprs[exprs == 0] <- NA
+exprs[exprs == 0] <- NA
 
 genes_sd <- apply(exprs, 1, sd, na.rm=TRUE)
 genes_mean <- rowMeans(exprs, na.rm=TRUE)
@@ -98,6 +100,7 @@ var.filter <- names(sort(gene_scores, decreasing=TRUE)[1:n_genes])
 # marker_genes <-
 #     c("Nefh", "Tac1", "Mrgprd", "Th", "Vim", "B2m",
 #       "Col6a2", "Ntrk1", "Calca", "P2rx3", "Pvalb")
+
 # marker_genes[which(marker_genes %in% var.filter)]
 
 usokin.processed <- usokin.processed[var.filter,]
@@ -114,13 +117,25 @@ rm(genes_cv)
 rm(mean_cv_model)
 rm(predicted_log2cv)
 
-# ---------- Scale Expression Values to [0, 1] ---------- #
-scale_gene <- function(x) { (x - min(x))/(max(x) - min(x)) }
-exprs.scaled <- apply(exprs(usokin.processed), 2, scale_gene)
-exprs(usokin.processed) <- exprs.scaled
+# ---------- Standardize Expression Values to N(0, 1) ---------- #
+if (standardize) {
+    standardize_gene <- function(x) { (x - mean(x))/sd(x) }
+    exprs.scaled <- t(apply(exprs(usokin.processed), 1, standardize_gene))
+    exprs(usokin.processed) <- exprs.scaled
+    
+    rm(standardize_gene)
+    rm(exprs.scaled)   
+}
 
-rm(scale_gene)
-rm(exprs.scaled)
+# ---------- Scale Expression Values to [0, 1] ---------- #
+if (scale) {
+    scale_gene <- function(x) { (x - min(x))/(max(x) - min(x)) }
+    exprs.scaled <- t(apply(exprs(usokin.processed), 1, scale_gene))
+    exprs(usokin.processed) <- exprs.scaled
+    
+    rm(scale_gene)
+    rm(exprs.scaled)    
+}
 
 # ---------- Create VAE-ready Benchmark Dataset ---------- #
 df <- as.data.frame(t(exprs(usokin.processed)))
@@ -130,16 +145,25 @@ df$neuronal_subtype <- usokin.processed$pca_all_neuronal_subtypes
 df <- cbind(rownames(df), df)
 colnames(df)[1] <- "cell_id"
 
+norm_technique <- ""
+if (scale) {
+    norm_technique <- "scaled"
+} else if (standardize) {
+    norm_technique <- "standardized"
+}
+
 write.table(df,
             file=paste(
-                "processed/mouse_neuronal_cells.", n_genes,
-                "g.txt", sep=""),
+                "processed/usokin.", n_genes,
+                "g.", norm_technique, ".txt", sep=""),
             quote=FALSE, row.names=FALSE,
             col.names=TRUE,
             sep="\t")
 
 saveRDS(usokin.processed,
-        paste("processed/mouse_neuronal_cells.", n_genes,
-              "g.SCESet.rds", sep=""))
+        paste("processed/usokin.", n_genes,
+              "g.", norm_technique, ".SCESet.rds", sep=""))
+
+
 
 

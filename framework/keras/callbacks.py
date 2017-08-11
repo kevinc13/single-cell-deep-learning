@@ -25,7 +25,7 @@ class FileLogger(Callback):
     """
     Custom file logging callback (based on keras.callbacks.CSVLogger)
     """
-    def __init__(self, filepath, delimiter=",", append=False):
+    def __init__(self, filepath, delimiter="\t", append=False):
         """
         Constructor
 
@@ -55,11 +55,16 @@ class FileLogger(Callback):
         def handle_value(k):
             is_zero_dim_ndarray = isinstance(k, np.ndarray) and k.ndim == 0
             if isinstance(k, six.string_types):
-                return k
+                return str(k)
             elif isinstance(k, Iterable) and not is_zero_dim_ndarray:
-                return '"[%s]"' % (', '.join(map(str, k)))
+                return '[%s]' % (', '.join(map(str, k)))
             else:
                 return k
+
+        if self.model.stop_training:
+            # We set NA so that csv parsers do not fail for this last epoch.
+            logs = dict(
+                [(k, logs[k]) if k in logs else (k, "NA") for k in self.keys])
 
         if not self.writer:
             self.keys = sorted(logs.keys())
