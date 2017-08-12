@@ -5,7 +5,7 @@ library(ggplot2)
 # ---------- Configuration ---------- #
 
 exp_name <- "train_usokin-100g-standardized-1layer-vae"
-model_name <- "51_UsokinVAE_FINAL"
+model_name <- "53_UsokinVAE_FINAL"
 
 # ---------- Load Latent Representations ---------- #
 

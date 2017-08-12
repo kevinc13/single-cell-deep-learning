@@ -7,9 +7,9 @@ from framework.keras.autoencoder import VariationalAutoencoder as VAE
 import numpy as np
 
 exp_name = "train_usokin-100g-standardized-1layer-vae"
-ref_model = "44_UsokinVAE"
+ref_model = "33_UsokinVAE"
 model_config = VAE.load_config("results/{}/{}".format(exp_name, ref_model))
-model_config["name"] = "51_UsokinVAE_FINAL"
+model_config["name"] = "53_UsokinVAE_FINAL"
 model_config["model_dir"] = \
     "/pylon5/mc4s8ap/kchen8/single-cell-deep-learning/results/{}/{}".format(
         exp_name, model_config["name"])
