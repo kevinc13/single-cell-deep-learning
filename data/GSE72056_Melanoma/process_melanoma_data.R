@@ -2,7 +2,8 @@ library(Biobase)
 library(data.table)
 library(scater)
 
-setwd("~/Documents/Research/XinghuaLuLab/single-cell-deep-learning/data/GSE72056_Melanoma")
+setwd(paste("~/Documents/Research/XinghuaLuLab/single-cell-deep-learning/",
+            "data/GSE72056_Melanoma", sep=""))
 
 #### Create SCESet ####
 melanoma.TPM <- fread("original/melanoma_cells_TPM.txt",
@@ -60,9 +61,9 @@ melanoma <- readRDS("original/melanoma.TPM.rds")
 melanoma <- melanoma[,melanoma$cell_type != "unresolved"]
 
 ### ---------- Parameters ---------- ###
-n_genes <- 1000
-standardize <- FALSE
-scale <- TRUE
+n_genes <- 100
+standardize <- TRUE
+scale <- FALSE
 
 ### ---------- Gene Filtering ---------- ###
 melanoma.processed <- melanoma
@@ -103,7 +104,7 @@ if (standardize) {
     exprs.scaled <- t(apply(exprs(melanoma.processed), 1, standardize_gene))
     exprs(melanoma.processed) <- exprs.scaled
     
-    rm(scale_gene)
+    rm(standardize_gene)
     rm(exprs.scaled)   
 }
 

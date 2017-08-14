@@ -2,33 +2,41 @@ from __future__ import (
     absolute_import, division, print_function, unicode_literals
 )
 
-import os
-import sys
-import six
 import csv
 import logging
-import numpy as np
+import os
+import sys
 from time import gmtime, strftime
 
-from .dataset import Dataset
+import six
+from hyperopt import fmin, tpe, Trials, space_eval
+
 
 class BaseExperiment(object):
 
     def __init__(self):
-        if not hasattr(self, "experiment_name") or \
-                self.experiment_name is None:
-            raise Exception("The experiment must specify an experiment name")
-
+        self.experiment_name = None
         self.root_dir = os.path.dirname(
             os.path.dirname(
                 os.path.dirname(
                     os.path.realpath(__file__))))
+        self.results_dir = None
+        self.experiment_dir = None
+
+        self.logger = None
+
+    def setup_dir(self):
+        if not hasattr(self, "experiment_name") or \
+                self.experiment_name is None:
+            raise Exception("The experiment must specify an experiment name")
+
         self.results_dir = "{}/results".format(self.root_dir)
         self.experiment_dir = "{}/{}".format(
             self.results_dir, self.experiment_name)
 
         self.create_dir(self.experiment_dir)
 
+    def setup_logger(self):
         # Setup logger
         self.logger = logging.getLogger(self.experiment_name)
         if len(self.logger.handlers) == 0:
@@ -79,3 +87,22 @@ class BaseExperiment(object):
 
     def current_time(self):
         return strftime("%m-%d-%y_%H:%M:%S", gmtime())
+
+
+class HyperoptExperiment(BaseExperiment):
+    def hyperopt_search_space(self):
+        raise Exception(
+            "The hyperopt experiment must implement \
+            the 'hyperopt_search_space' method")
+
+    def run_hyperopt(self, objective_func, n_evals):
+        trials = Trials()
+        if self.debug:
+            n_evals = 2
+        search_space = self.hyperopt_search_space()
+        best = fmin(objective_func,
+                    space=search_space,
+                    algo=tpe.suggest,
+                    max_evals=n_evals,
+                    trials=trials)
+        return trials, best, space_eval(search_space, best)

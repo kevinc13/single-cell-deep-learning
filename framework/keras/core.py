@@ -5,13 +5,14 @@ from __future__ import (
 import copy, json
 import tensorflow as tf
 from keras import backend as K
-from keras.models import model_from_json
 from keras.callbacks import (
-    ModelCheckpoint, EarlyStopping, TensorBoard, TerminateOnNaN
+    ModelCheckpoint, EarlyStopping, TensorBoard
 )
 from .callbacks import (
-    TimeLogger, FileLogger
+    TimeLogger, FileLogger,
+    TerminateOnNaN
 )
+
 
 class BaseModel(object):
     """
@@ -24,7 +25,7 @@ class BaseModel(object):
 
         Args:
             config: Dictionary of model configuration parameters
-        """        
+        """
         self.config = copy.deepcopy(config)
 
         # Session management
@@ -34,7 +35,7 @@ class BaseModel(object):
         self.name = self.config["name"] if "name" in self.config else "Model"
         self.model_dir = self.config["model_dir"] \
             if "model_dir" in self.config else None
-        
+
         self.callbacks = []
         self._setup_default_callbacks()
 
@@ -70,7 +71,7 @@ class BaseModel(object):
             self.callbacks.append(TimeLogger())
             self.callbacks.append(FileLogger(
                 self.model_dir + "/training.log", append=True))
-            
+
         if "early_stopping_metric" in self.config \
                 and "early_stopping_min_delta" in self.config \
                 and "early_stopping_patience" in self.config:
@@ -104,7 +105,7 @@ class BaseModel(object):
             self.model_dir + "/keras_model.weights.h5")
 
     @classmethod
-    def restore(cls, model_dir): 
+    def restore(cls, model_dir):
         """
         Restore a previously saved version of the model
         """
