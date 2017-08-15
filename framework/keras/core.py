@@ -2,12 +2,15 @@ from __future__ import (
     absolute_import, division, print_function, unicode_literals
 )
 
-import copy, json
+import copy
+import json
+
 import tensorflow as tf
 from keras import backend as K
 from keras.callbacks import (
     ModelCheckpoint, EarlyStopping, TensorBoard
 )
+
 from .callbacks import (
     TimeLogger, FileLogger,
     TerminateOnNaN
@@ -82,7 +85,7 @@ class BaseModel(object):
 
         self.callbacks.append(TerminateOnNaN())
 
-    def build(self, graph):
+    def build(self):
         raise Exception("The model must implement the build method")
 
     def save_config(self):
@@ -101,8 +104,9 @@ class BaseModel(object):
             return json.load(f)
 
     def load_weights(self):
-        self.keras_model.load_weights(
-            self.model_dir + "/keras_model.weights.h5")
+        if hasattr(self, "keras_model"):
+            self.keras_model.load_weights(
+                self.model_dir + "/keras_model.weights.h5")
 
     @classmethod
     def restore(cls, model_dir):

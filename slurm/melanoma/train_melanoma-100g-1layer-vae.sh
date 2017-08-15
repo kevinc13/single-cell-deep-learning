@@ -2,7 +2,7 @@
 #SBATCH -N 1
 #SBATCH -p GPU-shared
 #SBATCH --ntasks-per-node 7
-#SBATCH --gres=gpu:k80:1
+#SBATCH --gres=gpu:p100:1
 #SBATCH -t 48:00:00
 #echo commands to stdout
 set -x
@@ -17,4 +17,4 @@ cd $pylon5/$project_name
 module load tensorflow/1.0.1_anaconda
 source activate $TENSORFLOW_ENV
 
-python main.py --e "melanoma.train_100g-1layer-vae"
+python main.py --e "melanoma.train_melanoma-100g-1layer-vae"

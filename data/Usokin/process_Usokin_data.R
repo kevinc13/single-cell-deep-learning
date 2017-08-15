@@ -48,7 +48,7 @@ saveRDS(usokin, "original/mouse_neuronal_cells.rds")
 usokin <- readRDS("original/mouse_neuronal_cells.rds")
 
 ### ---------- Parameters ---------- ###
-n_genes <- 100
+n_genes <- 500
 standardize <- TRUE
 scale <- FALSE
 

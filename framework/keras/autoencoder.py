@@ -322,7 +322,7 @@ class VariationalAutoencoder(BaseModel):
     def _warmup(self, epoch):
         n_epochs = self.config["n_warmup_epochs"]
         warmup_beta = (epoch / n_epochs) * (epoch <= n_epochs) + \
-                      1.0 * (epoch > n_epochs)
+            1.0 * (epoch > n_epochs)
         K.set_value(self.warmup_beta, warmup_beta)
 
     def train(self, train_dataset,
@@ -334,8 +334,8 @@ class VariationalAutoencoder(BaseModel):
                                  batch_size=batch_size, epochs=epochs,
                                  shuffle=True, callbacks=self.callbacks,
                                  verbose=2, validation_data=(
-                    validation_dataset.features,
-                    validation_dataset.features))
+                                     validation_dataset.features,
+                                     validation_dataset.features))
         else:
             self.keras_model.fit(train_dataset.features,
                                  train_dataset.features,

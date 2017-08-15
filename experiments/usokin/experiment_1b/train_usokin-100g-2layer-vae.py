@@ -19,7 +19,7 @@ class Experiment(HyperoptExperiment):
         self.debug = debug
         self.n_evals = 50
 
-        self.experiment_name = "train_melanoma-100g-1layer-vae"
+        self.experiment_name = "train_usokin-100g-2layer-vae"
         if self.debug:
             self.experiment_name = "DEBUG_" + self.experiment_name
 
@@ -32,7 +32,7 @@ class Experiment(HyperoptExperiment):
 
     def load_data(self):
         df = np.array(self.read_data_table(
-            "data/GSE72056_Melanoma/processed/melanoma.100g.standardized.txt"))
+            "data/Usokin/processed/usokin.100g.standardized.txt"))
         features = df[1:, 1:-1]
 
         cell_ids = df[1:, 0]
@@ -43,7 +43,8 @@ class Experiment(HyperoptExperiment):
     def hyperopt_search_space(self):
         return {
             "encoder_layer_sizes": [
-                hp.choice("layer1", [25, 50, 100])
+                hp.choice("layer1", [50, 100]),
+                hp.choice("layer2", [25, 50])
             ],
             "latent_size": hp.choice(
                 "latent_size", [10, 15, 20, 25, 50]),
@@ -70,8 +71,7 @@ class Experiment(HyperoptExperiment):
                         "momentum": hp.choice(
                             "sgd_momentum", [0.5, 0.9, 0.95, 0.99])
                     }
-                ]),
-            "batch_norm": hp.choice("batch_norm", [True, False])
+                ])
         }
 
     def get_model_config(self, case_config):
@@ -85,22 +85,25 @@ class Experiment(HyperoptExperiment):
             "early_stopping_patience": 5
         }
 
-        model_name = "Case{}_MelanomaVAE".format(self.case_counter)
+        model_name = "Case{}_UsokinVAE".format(self.case_counter)
         model_dir = self.get_model_dir(model_name)
         encoder_layers = [
             "Dense:{}:activation='{}'".format(
                 case_config["encoder_layer_sizes"][0],
-                case_config["activation"])
+                case_config["activation"]),
+            "BatchNormalization",
+            "Dense:{}:activation='{}'".format(
+                case_config["encoder_layer_sizes"][1],
+                case_config["activation"]),
+            "BatchNormalization"
         ]
-        if case_config["batch_norm"]:
-            encoder_layers.append("BatchNormalization")
 
         if case_config["optimizer"]["name"] == "sgd":
             optimizer = "{}:lr={}:momentum={}:nesterov=True".format(
                 case_config["optimizer"]["name"],
                 case_config["optimizer"]["lr"],
                 case_config["optimizer"]["momentum"])
-        elif case_config["optimizer"]["name"] in ["adam", "rmsprop"]:
+        else:
             optimizer = "{}:lr={}".format(
                 case_config["optimizer"]["name"],
                 case_config["optimizer"]["lr"])
@@ -241,7 +244,7 @@ class Experiment(HyperoptExperiment):
             features, cell_types,
             [cell_ids, cell_types],
             n_folds=10, convert_labels_to_int=True)
-        self.logger.info("Loaded 100g, scaled melanoma dataset")
+        self.logger.info("Loaded 100g, standardized Usokin dataset")
 
         trials, _, best_loss_case_config = self.run_hyperopt(
             self.train_case_vae, self.n_evals)
