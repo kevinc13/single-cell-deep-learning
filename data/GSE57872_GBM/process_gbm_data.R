@@ -43,9 +43,9 @@ gbm <- readRDS("original/gbm.rds")
 gbm <- gbm[,gbm$cell_origin == "primary_GBM"]
 
 ### ---------- Parameters ---------- ###
-n_genes <- 100
-standardize <- FALSE
-scale <- TRUE
+n_genes <- 500
+standardize <- TRUE
+scale <- FALSE
 
 ### ---------- Select Most Variable Genes ---------- ###
 gbm.processed <- gbm
@@ -63,7 +63,7 @@ if (standardize) {
     exprs.scaled <- t(apply(exprs(gbm.processed), 1, standardize_gene))
     exprs(gbm.processed) <- exprs.scaled
     
-    rm(scale_gene)
+    rm(standardize_gene)
     rm(exprs.scaled)   
 }
 

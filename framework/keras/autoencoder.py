@@ -72,7 +72,6 @@ class DeepAutoencoder(BaseModel):
 
         if "pretraining_weights_and_biases" in self.config:
             self.load_pretraining_weights_and_biases()
-            self.logger.info("Loaded pretrained weights and biases")
 
     def load_pretraining_weights_and_biases(self):
         """
@@ -355,23 +354,3 @@ class VariationalAutoencoder(BaseModel):
     def generate(self, z, batch_size=50):
         return self.generator_model.predict(
             z, batch_size=batch_size, verbose=0)
-
-
-class BetaVariationalAutoencoder(VariationalAutoencoder):
-    def setup(self):
-        super(BetaVariationalAutoencoder, self).setup()
-        self.beta = self.config["beta"] if "beta" in self.config else 1.0
-
-    def _loss(self, y_true, y_pred):
-        """
-        Loss (objective) function of VAE:
-            L = E[log(P(x|z))] - beta * KL(Q(z|x)||P(z))
-        """
-        reconstruction_error = K.sum(
-            K.binary_crossentropy(y_true, y_pred), axis=1)
-        kl_divergence = - 0.5 * K.sum(
-            1 + self.z_log_var - \
-            K.exp(self.z_log_var) - \
-            K.square(self.z_mean),
-            axis=-1)
-        return K.mean(reconstruction_error + self.beta * kl_divergence)

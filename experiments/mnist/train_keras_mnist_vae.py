@@ -10,12 +10,12 @@ from framework.common.dataset import Dataset
 from framework.common.experiment import BaseExperiment
 import matplotlib.pyplot as plt
 
-class Experiment(BaseExperiment):
 
+class Experiment(BaseExperiment):
     def __init__(self, debug=False):
+        super(Experiment, self).__init__(debug)
+
         self.experiment_name = "train_keras_mnist_vae"
-        self.debug = debug
-        super(Experiment, self).__init__()
 
     def run(self):
         (x_train, y_train), (x_test, y_test) = mnist.load_data()
@@ -43,15 +43,14 @@ class Experiment(BaseExperiment):
             ],
             "latent_size": 2,
 
-            "n_warmup_epochs": 5,
             "optimizer": "adam"
         }
 
         if self.debug:
-            epochs = 5
+            epochs = 2
         else:
             epochs = 50
-        
+
         vae = VAE(model_config)
         vae.train(train_dataset, epochs=epochs, batch_size=100,
                   validation_dataset=test_dataset)
@@ -59,7 +58,7 @@ class Experiment(BaseExperiment):
         latent_reps = vae.encode(test_dataset.features)
 
         results = np.hstack((
-            latent_reps, 
+            latent_reps,
             np.expand_dims(test_dataset.labels, axis=1)
         ))
 
@@ -80,4 +79,3 @@ class Experiment(BaseExperiment):
         plt.scatter(latent_reps[:, 0], latent_reps[:, 1], c=y_test)
         plt.colorbar()
         plt.show()
-

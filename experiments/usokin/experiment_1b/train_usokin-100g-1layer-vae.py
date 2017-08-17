@@ -5,26 +5,37 @@ from __future__ import (
 from math import log
 
 import numpy as np
-from hyperopt import hp, fmin, tpe, STATUS_OK, Trials, space_eval
+from hyperopt import hp
 
-from framework.common.dataset import Dataset
-from framework.common.experiment import BaseExperiment
+from framework.common.experiment import HyperoptExperiment, \
+    CrossValidationExperiment
 from framework.common.sampling import stratified_kfold
 from framework.keras.autoencoder import VariationalAutoencoder as VAE
 
 
-class Experiment(BaseExperiment):
+class Experiment(CrossValidationExperiment, HyperoptExperiment):
     def __init__(self, debug=False):
-        self.debug = debug
-        self.n_evals = 50
+        super(Experiment, self).__init__(debug)
 
-        self.experiment_name = "train_usokin-100g-standardized-1layer-vae"
+        self.experiment_name = "train_usokin-100g-1layer-vae"
         if self.debug:
             self.experiment_name = "DEBUG_" + self.experiment_name
 
-        self.datasets = []
-        self.case_counter = 0
-        super(Experiment, self).__init__()
+        self.setup_dir()
+        self.setup_logger()
+        self.setup_hyperopt(n_evals=50)
+
+        self.input_size = 100
+        cell_ids, features, cell_types, cell_subtypes = self.load_data()
+        self.datasets = stratified_kfold(
+            features, cell_subtypes,
+            [cell_ids, cell_types, cell_subtypes],
+            n_folds=10, convert_labels_to_int=True)
+        self.logger.info("Loaded 100g, standardized Usokin dataset")
+
+        self.setup_cross_validation(n_folds=10,
+                                    datasets=self.datasets,
+                                    model_class=VAE)
 
     def load_data(self):
         df = np.array(self.read_data_table(
@@ -37,13 +48,13 @@ class Experiment(BaseExperiment):
 
         return cell_ids, features, cell_types, cell_subtypes
 
-    def generate_search_space(self):
+    def hyperopt_search_space(self):
         return {
             "encoder_layer_sizes": [
-                hp.choice("layer1", [25, 50, 100, 150])
+                hp.choice("layer1", [50, 100, 150])
             ],
             "latent_size": hp.choice(
-                "latent_size", [4, 11, 25, 50]),
+                "latent_size", [4, 11, 20, 50]),
             "activation": hp.choice(
                 "activation", ["elu", "relu", "sigmoid", "tanh"]),
             "batch_size": hp.choice(
@@ -67,13 +78,12 @@ class Experiment(BaseExperiment):
                         "lr": hp.loguniform(
                             "rmsprop_lr", -6 * log(10), -1 * log(10))
                     }
-                ]),
-            "batch_norm": hp.choice("batch_norm", [True, False])
+                ])
         }
 
     def get_model_config(self, case_config):
         model_config = {
-            "input_size": 100,
+            "input_size": self.input_size,
             "bernoulli": False,
             "metrics": [],
 
@@ -87,10 +97,9 @@ class Experiment(BaseExperiment):
         encoder_layers = [
             "Dense:{}:activation='{}'".format(
                 case_config["encoder_layer_sizes"][0],
-                case_config["activation"])
+                case_config["activation"]),
+            "BatchNormalization"
         ]
-        if case_config["batch_norm"]:
-            encoder_layers.append("BatchNormalization")
 
         if case_config["optimizer"]["name"] == "sgd":
             optimizer = "{}:lr={}:momentum={}:nesterov=True".format(
@@ -113,90 +122,28 @@ class Experiment(BaseExperiment):
 
         return model_config
 
-    def train_vae(self, case_config):
-        model_config = self.get_model_config(case_config)
-        self.create_dir(model_config["model_dir"])
-
-        self.logger.info("Training {}: {}|{}|batch_size={}".format(
-            model_config["name"],
-            case_config["activation"],
-            model_config["optimizer"],
-            model_config["batch_size"]))
-
-        avg_valid_loss = 0.0
-        for k in range(0, 10):
-            train_dataset = Dataset.concatenate(
-                *(self.datasets[:k] + self.datasets[(k + 1):]))
-            valid_dataset = self.datasets[k]
-            # Start training!
-            vae = VAE(model_config)
-
-            if self.debug:
-                epochs = 2
-            else:
-                epochs = 100
-
-            vae.train(train_dataset,
-                      epochs=epochs, batch_size=case_config["batch_size"],
-                      validation_dataset=valid_dataset)
-
-            fold_valid_loss = vae.evaluate(valid_dataset)[0]
-            self.logger.info("{}|Fold #{} Loss = {:f}".format(
-                model_config["name"], k + 1, fold_valid_loss))
-
-            avg_valid_loss += fold_valid_loss
-
-            if self.debug:
-                break
-
-        avg_valid_loss /= 10
-        self.logger.info("{}|Avg Validation Loss = {:f}".format(
-            model_config["name"], avg_valid_loss))
-
-        self.case_counter += 1
-
-        return {
-            "status": STATUS_OK,
-            "loss": avg_valid_loss,
-            "name": model_config["name"],
-            "model_config": model_config
-        }
-
     def train_final_vae(self, model_config):
-        model_config["name"] += "_FINAL"
-        model_dir = self.get_model_dir(model_config["name"])
-        self.create_dir(model_dir)
-        model_config["model_dir"] = model_dir
         model_config["bernoulli"] = False
         model_config["tensorboard"] = True
         model_config["checkpoint"] = True
 
-        n_epochs = 2 if self.debug else 100
-        full_dataset = Dataset.concatenate(*self.datasets)
+        results = self.train_final_model(model_config)
+        final_vae = results["model"]
+        full_dataset = results["dataset"]
 
-        self.logger.info("Training Final VAE: " + model_config["name"])
-        final_vae = VAE(model_config)
-        final_vae.train(full_dataset,
-                        epochs=n_epochs, batch_size=50,
-                        validation_dataset=full_dataset)
-        loss = final_vae.evaluate(full_dataset)[0]
-        self.logger.info("{}|Loss = {:f}".format(model_config["name"], loss))
-
-        self.logger.info("Encoding latent representations...")
+        self.logger.info("Encoding latent represenations...")
         latent_reps = final_vae.encode(full_dataset.features)
 
         results = np.hstack((
             np.expand_dims(full_dataset.sample_data[0], axis=1),
             latent_reps,
-            np.expand_dims(full_dataset.sample_data[1], axis=1),
-            np.expand_dims(full_dataset.sample_data[2], axis=1)
+            np.expand_dims(full_dataset.sample_data[1], axis=1)
         ))
 
         header = ["cell_ids"]
         for l in range(1, model_config["latent_size"] + 1):
             header.append("dim{}".format(l))
         header.append("cell_type")
-        header.append("cell_subtype")
         header = np.array(header)
 
         results = np.vstack((header, results))
@@ -207,47 +154,57 @@ class Experiment(BaseExperiment):
             model_config["model_dir"] + "/latent_representations.txt")
 
     def run(self, debug=False):
-        # Load Usokin dataset
-        cell_ids, features, cell_types, cell_subtypes = self.load_data()
-        self.datasets = stratified_kfold(
-            features, cell_subtypes,
-            [cell_ids, cell_types, cell_subtypes],
-            n_folds=10, convert_labels_to_int=True)
+        self.logger.info("EXPERIMENT START")
 
-        # Setup Hyperopt
-        trials = Trials()
-        search_space = self.generate_search_space()
-        n_evals = 1 if self.debug else self.n_evals
-        best = fmin(self.train_vae,
-                    space=search_space,
-                    algo=tpe.suggest,
-                    max_evals=n_evals,
-                    trials=trials)
+        trials, _, best_loss_case_config = self.run_hyperopt(
+            self.train_case_model)
         self.logger.info("Finished hyperopt optimization")
 
-        # Train the final VAE using the best model config from Hyperopt
-        best_model_config = self.get_model_config(
-            space_eval(search_space, best))
-        self.train_final_vae(best_model_config)
-
-        # Write experiment results
+        # Save experiment results
+        losses = []
         experiment_results = [[
             "model_name",
             "encoder_layers",
             "latent_size",
             "optimizer",
             "batch_size",
-            "10foldcv_loss"
+            "cv_reconstruction_loss",
+            "cv_kl_divergence_loss",
+            "cv_total_loss"
         ]]
         for result in trials.results:
+            losses.append((
+                result["model_config"],
+                result["avg_valid_metrics"]["reconstruction_loss"],
+                result["avg_valid_metrics"]["kl_divergence_loss"],
+                result["avg_valid_metrics"]["loss"]))
             experiment_results.append([
-                result["name"],
-                str(result["model_config"]["encoder_layers"]),
+                result["model_config"]["name"],
+                result["model_config"]["encoder_layers"],
                 result["model_config"]["latent_size"],
                 result["model_config"]["optimizer"],
                 result["model_config"]["batch_size"],
-                result["loss"]
+                result["avg_valid_metrics"]["reconstruction_loss"],
+                result["avg_valid_metrics"]["kl_divergence_loss"],
+                result["avg_valid_metrics"]["loss"]
             ])
         self.save_data_table(
             experiment_results,
             self.experiment_dir + "/experiment_results.txt")
+        self.logger.info("Saved experiment results")
+
+        # Train the final VAE using the best model configs
+        best_loss_model_config = self.get_model_config(best_loss_case_config)
+        best_loss_model_config["name"] = "UsokinVAE_BestTotalLoss"
+
+        best_recon_loss_model_config = sorted(losses, key=lambda x: x[1])[0][0]
+        best_recon_loss_model_config["name"] = "UsokinVAE_BestReconLoss"
+
+        best_kl_loss_model_config = sorted(losses, key=lambda x: x[2])[0][0]
+        best_kl_loss_model_config["name"] = "UsokinVAE_BestKLDivergenceLoss"
+
+        self.train_final_vae(best_loss_model_config)
+        self.train_final_vae(best_recon_loss_model_config)
+        self.train_final_vae(best_kl_loss_model_config)
+
+        self.logger.info("EXPERIMENT END")

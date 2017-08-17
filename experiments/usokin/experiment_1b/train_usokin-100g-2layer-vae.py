@@ -3,42 +3,50 @@ from __future__ import (
 )
 
 from math import log
+
 import numpy as np
-from hyperopt import STATUS_OK, STATUS_FAIL
 from hyperopt import hp
 
-from framework.common.dataset import Dataset
-from framework.common.experiment import HyperoptExperiment
+from framework.common.experiment import HyperoptExperiment, \
+    CrossValidationExperiment
 from framework.common.sampling import stratified_kfold
 from framework.keras.autoencoder import VariationalAutoencoder as VAE
 
 
-class Experiment(HyperoptExperiment):
+class Experiment(CrossValidationExperiment, HyperoptExperiment):
     def __init__(self, debug=False):
-        super(Experiment, self).__init__()
-        self.debug = debug
-        self.n_evals = 50
+        super(Experiment, self).__init__(debug)
 
         self.experiment_name = "train_usokin-100g-2layer-vae"
         if self.debug:
             self.experiment_name = "DEBUG_" + self.experiment_name
 
-        self.datasets = []
-        self.case_counter = 0
-
-        # Create experiment directory, setup logger
         self.setup_dir()
         self.setup_logger()
+        self.setup_hyperopt(n_evals=50)
+
+        self.input_size = 100
+        cell_ids, features, cell_types, cell_subtypes = self.load_data()
+        self.datasets = stratified_kfold(
+            features, cell_subtypes,
+            [cell_ids, cell_types, cell_subtypes],
+            n_folds=10, convert_labels_to_int=True)
+        self.logger.info("Loaded 100g, standardized Usokin dataset")
+
+        self.setup_cross_validation(n_folds=10,
+                                    datasets=self.datasets,
+                                    model_class=VAE)
 
     def load_data(self):
         df = np.array(self.read_data_table(
             "data/Usokin/processed/usokin.100g.standardized.txt"))
-        features = df[1:, 1:-1]
+        features = df[1:, 1:-2]
 
         cell_ids = df[1:, 0]
-        cell_types = df[1:, -1]
+        cell_types = df[1:, -2]
+        cell_subtypes = df[1:, -1]
 
-        return cell_ids, features, cell_types
+        return cell_ids, features, cell_types, cell_subtypes
 
     def hyperopt_search_space(self):
         return {
@@ -47,7 +55,7 @@ class Experiment(HyperoptExperiment):
                 hp.choice("layer2", [25, 50])
             ],
             "latent_size": hp.choice(
-                "latent_size", [10, 15, 20, 25, 50]),
+                "latent_size", [10, 15, 20, 25, 50, 100]),
             "activation": hp.choice(
                 "activation", ["elu", "relu", "sigmoid", "tanh"]),
             "batch_size": hp.choice(
@@ -60,23 +68,23 @@ class Experiment(HyperoptExperiment):
                             "adam_lr", -6 * log(10), -1 * log(10))
                     },
                     {
-                        "name": "rmsprop",
-                        "lr": hp.loguniform(
-                            "rmsprop_lr", -6 * log(10), -1 * log(10))
-                    },
-                    {
                         "name": "sgd",
                         "lr": hp.loguniform(
                             "sgd_lr", -8 * log(10), -4 * log(10)),
                         "momentum": hp.choice(
                             "sgd_momentum", [0.5, 0.9, 0.95, 0.99])
+                    },
+                    {
+                        "name": "rmsprop",
+                        "lr": hp.loguniform(
+                            "rmsprop_lr", -6 * log(10), -1 * log(10))
                     }
                 ])
         }
 
     def get_model_config(self, case_config):
         model_config = {
-            "input_size": 100,
+            "input_size": self.input_size,
             "bernoulli": False,
             "metrics": [],
 
@@ -85,7 +93,7 @@ class Experiment(HyperoptExperiment):
             "early_stopping_patience": 5
         }
 
-        model_name = "Case{}_UsokinVAE".format(self.case_counter)
+        model_name = "{}_UsokinVAE".format(self.case_counter)
         model_dir = self.get_model_dir(model_name)
         encoder_layers = [
             "Dense:{}:activation='{}'".format(
@@ -119,100 +127,14 @@ class Experiment(HyperoptExperiment):
 
         return model_config
 
-    def train_case_vae(self, case_config):
-        model_config = self.get_model_config(case_config)
-        self.create_dir(model_config["model_dir"])
-
-        self.logger.info("Training {}: {}|{}|batch_size={}".format(
-            model_config["name"],
-            case_config["activation"],
-            model_config["optimizer"],
-            model_config["batch_size"]))
-
-        status = STATUS_OK
-
-        avg_valid_loss = 0.0
-        avg_valid_recon_loss = 0.0
-        avg_valid_kl_loss = 0.0
-        for k in range(0, 10):
-            train_dataset = Dataset.concatenate(
-                *(self.datasets[:k] + self.datasets[(k + 1):]))
-            valid_dataset = self.datasets[k]
-            # Start training!
-            vae = VAE(model_config)
-
-            if self.debug:
-                epochs = 2
-            else:
-                epochs = 100
-
-            vae.train(train_dataset,
-                      epochs=epochs, batch_size=model_config["batch_size"],
-                      validation_dataset=valid_dataset)
-
-            fold_valid_loss, fold_valid_recon_loss, \
-                fold_valid_kl_loss = vae.evaluate(valid_dataset)
-            if np.isnan(fold_valid_loss) or np.isnan(
-                    fold_valid_recon_loss) or np.isnan(fold_valid_kl_loss):
-                avg_valid_loss = None
-                avg_valid_recon_loss = None
-                avg_valid_kl_loss = None
-
-                status = STATUS_FAIL
-                break
-            else:
-                self.logger.info(
-                    "{}|Fold #{} Loss={:f}; Recon. Loss={:f}; KL Loss={:f}"
-                        .format(model_config["name"], k + 1,
-                                fold_valid_loss, fold_valid_recon_loss,
-                                fold_valid_kl_loss))
-                avg_valid_loss += fold_valid_loss
-                avg_valid_recon_loss += fold_valid_recon_loss
-                avg_valid_kl_loss += fold_valid_kl_loss
-
-            if self.debug:
-                break
-
-        if status != STATUS_FAIL:
-            avg_valid_loss /= 10
-            avg_valid_recon_loss /= 10
-            avg_valid_kl_loss /= 10
-            self.logger.info("{}|Avg Valid Loss = {:f}".format(
-                model_config["name"], avg_valid_loss))
-            self.logger.info("{}|Avg Valid Recon Loss = {:f}".format(
-                model_config["name"], avg_valid_recon_loss))
-            self.logger.info("{}|Avg Valid KL Divergence Loss = {:f}".format(
-                model_config["name"], avg_valid_kl_loss))
-
-        self.case_counter += 1
-
-        return {
-            "status": status,
-            "loss": avg_valid_loss,
-            "recon_loss": avg_valid_recon_loss,
-            "kl_loss": avg_valid_kl_loss,
-            "name": model_config["name"],
-            "model_config": model_config
-        }
-
     def train_final_vae(self, model_config):
-        model_dir = self.get_model_dir(model_config["name"])
-        self.create_dir(model_dir)
-        model_config["model_dir"] = model_dir
         model_config["bernoulli"] = False
         model_config["tensorboard"] = True
         model_config["checkpoint"] = True
 
-        n_epochs = 2 if self.debug else 100
-        full_dataset = Dataset.concatenate(*self.datasets)
-
-        self.logger.info("Training Final VAE: {}".format(model_config["name"]))
-        final_vae = VAE(model_config)
-        final_vae.train(full_dataset, epochs=n_epochs,
-                        batch_size=model_config["batch_size"],
-                        validation_dataset=full_dataset)
-        loss = final_vae.evaluate(full_dataset)[0]
-        self.logger.info("{}|Loss = {:f}".format(model_config["name"], loss))
+        results = self.train_final_model(model_config)
+        final_vae = results["model"]
+        full_dataset = results["dataset"]
 
         self.logger.info("Encoding latent represenations...")
         latent_reps = final_vae.encode(full_dataset.features)
@@ -239,15 +161,8 @@ class Experiment(HyperoptExperiment):
     def run(self, debug=False):
         self.logger.info("EXPERIMENT START")
 
-        cell_ids, features, cell_types = self.load_data()
-        self.datasets = stratified_kfold(
-            features, cell_types,
-            [cell_ids, cell_types],
-            n_folds=10, convert_labels_to_int=True)
-        self.logger.info("Loaded 100g, standardized Usokin dataset")
-
         trials, _, best_loss_case_config = self.run_hyperopt(
-            self.train_case_vae, self.n_evals)
+            self.train_case_model)
         self.logger.info("Finished hyperopt optimization")
 
         # Save experiment results
@@ -265,18 +180,18 @@ class Experiment(HyperoptExperiment):
         for result in trials.results:
             losses.append((
                 result["model_config"],
-                result["recon_loss"],
-                result["kl_loss"],
-                result["loss"]))
+                result["avg_valid_metrics"]["reconstruction_loss"],
+                result["avg_valid_metrics"]["kl_divergence_loss"],
+                result["avg_valid_metrics"]["loss"]))
             experiment_results.append([
-                result["name"],
-                str(result["model_config"]["encoder_layers"]),
+                result["model_config"]["name"],
+                result["model_config"]["encoder_layers"],
                 result["model_config"]["latent_size"],
                 result["model_config"]["optimizer"],
                 result["model_config"]["batch_size"],
-                result["recon_loss"],
-                result["kl_loss"],
-                result["loss"]
+                result["avg_valid_metrics"]["reconstruction_loss"],
+                result["avg_valid_metrics"]["kl_divergence_loss"],
+                result["avg_valid_metrics"]["loss"]
             ])
         self.save_data_table(
             experiment_results,

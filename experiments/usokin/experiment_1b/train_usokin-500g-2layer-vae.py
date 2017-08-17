@@ -17,7 +17,7 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
     def __init__(self, debug=False):
         super(Experiment, self).__init__(debug)
 
-        self.experiment_name = "train_melanoma-100g-1layer-vae"
+        self.experiment_name = "train_usokin-500g-2layer-vae"
         if self.debug:
             self.experiment_name = "DEBUG_" + self.experiment_name
 
@@ -25,13 +25,13 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
         self.setup_logger()
         self.setup_hyperopt(n_evals=50)
 
-        self.input_size = 100
+        self.input_size = 500
         cell_ids, features, cell_types, cell_subtypes = self.load_data()
         self.datasets = stratified_kfold(
             features, cell_subtypes,
             [cell_ids, cell_types, cell_subtypes],
             n_folds=10, convert_labels_to_int=True)
-        self.logger.info("Loaded 100g, standardized melanoma dataset")
+        self.logger.info("Loaded 500g, standardized Usokin dataset")
 
         self.setup_cross_validation(n_folds=10,
                                     datasets=self.datasets,
@@ -51,10 +51,11 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
     def hyperopt_search_space(self):
         return {
             "encoder_layer_sizes": [
-                hp.choice("layer1", [50, 100])
+                hp.choice("layer1", list(range(350, 550, 50))),
+                hp.choice("layer2", list(range(150, 350, 50)))
             ],
             "latent_size": hp.choice(
-                "latent_size", [10, 15, 20, 25, 50]),
+                "latent_size", [10, 15, 20, 25, 50, 100]),
             "activation": hp.choice(
                 "activation", ["elu", "relu", "sigmoid", "tanh"]),
             "batch_size": hp.choice(
@@ -97,6 +98,10 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
         encoder_layers = [
             "Dense:{}:activation='{}'".format(
                 case_config["encoder_layer_sizes"][0],
+                case_config["activation"]),
+            "BatchNormalization",
+            "Dense:{}:activation='{}'".format(
+                case_config["encoder_layer_sizes"][1],
                 case_config["activation"]),
             "BatchNormalization"
         ]

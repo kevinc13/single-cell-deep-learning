@@ -61,7 +61,7 @@ melanoma <- readRDS("original/melanoma.TPM.rds")
 melanoma <- melanoma[,melanoma$cell_type != "unresolved"]
 
 ### ---------- Parameters ---------- ###
-n_genes <- 100
+n_genes <- 500
 standardize <- TRUE
 scale <- FALSE
 
