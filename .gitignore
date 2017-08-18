@@ -20,3 +20,4 @@ results/*
 
 # JetBrains IDE
 .idea/
+.Rproj.user

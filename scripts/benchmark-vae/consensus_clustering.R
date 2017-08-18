@@ -2,20 +2,27 @@ library(data.table)
 library(ConsensusClusterPlus)
 library(pheatmap)
 library(RColorBrewer)
+library(caret)
 
 source("utils.R")
 
 cluster_latent_reps <- function(x, labels, base_dir,
-                                maxK, clusterAlg="pam", force_opt_k=NA,
+                                maxK, force_opt_k=NA,
+                                clusterAlg="pam",
+                                dist="euclidean",
                                 plot=TRUE, colors=NA) {
     results_dir <- paste(base_dir,
-                         "/ConsensusClustering_", clusterAlg, sep="")
+                         "/ConsensusClustering_",
+                         clusterAlg, "_", dist, sep="")
+    dir.create(results_dir, showWarnings=FALSE)
     results_filepath <- paste(results_dir, "/cluster_results.Rdata", sep="")
     
     print_divider("=")
     catln("Consensus Clustering")
     catln(dim(x)[1], " samples | ", dim(x)[2], " features")
-    catln("Parameters: Max K = ", maxK, " | Cluster Alg = ", clusterAlg)
+    catln("Parameters:")
+    catln("Max K = ", maxK, " | Cluster Alg = ", clusterAlg)
+    catln("Distance = ", dist)
     print_divider("-")
     
     # ---------- Consensus Clustering ---------- #
@@ -23,12 +30,13 @@ cluster_latent_reps <- function(x, labels, base_dir,
         cluster_results <- ConsensusClusterPlus(t(as.matrix(x)),
                                                 maxK=maxK, reps=100,
                                                 clusterAlg=clusterAlg,
-                                                distance="euclidean",
-                                                innerLinkage="average",
+                                                distance=dist,
                                                 plot="pdf",
                                                 title=paste(base_dir, 
                                                             "/ConsensusClustering_",
-                                                            clusterAlg,sep=""))
+                                                            clusterAlg, "_",
+                                                            dist,
+                                                            sep=""))
         save(cluster_results, file=results_filepath)
         catln("Finished clustering")
     } else {
@@ -42,7 +50,7 @@ cluster_latent_reps <- function(x, labels, base_dir,
     Kvec = 2:maxK
     x1 = 0.1; x2 = 0.9 # threshold defining the intermediate sub-interval
     PAC = rep(NA,length(Kvec)) 
-    names(PAC) = paste("K=",Kvec,sep="") # from 2 to maxK
+    names(PAC) = paste("k",Kvec,sep="") # from 2 to maxK
     
     for(i in Kvec){
         M = cluster_results[[i]]$consensusMatrix
@@ -57,13 +65,14 @@ cluster_latent_reps <- function(x, labels, base_dir,
     cat("\n")
     catln("Optimal K = ", optK)
     if (!is.na(force_opt_k)) {
-        optK <- force_opt_k
+        best_results <- cluster_results[[force_opt_k]]
         catln("Forcing optimal K = ", force_opt_k)
+    } else {
+        best_results <- cluster_results[[optK]]
     }
     print_divider("-")
     
     # ---------- Evaluate Clustering Performance ---------- #
-    best_results <- cluster_results[[optK]]
     rownames(best_results$consensusMatrix) <- names(labels)
     colnames(best_results$consensusMatrix) <- names(labels)
     hc_order <- best_results$consensusTree$order
@@ -134,13 +143,14 @@ cluster_latent_reps <- function(x, labels, base_dir,
     
     print_divider("=")
     
-    return(list(cluster_results=cluster_results,
+    return(list(consensus_results=cluster_results,
                 best_results=best_results,
                 cluster_assignments=cluster_assignments,
                 ari=ari,
                 acc=acc,
                 pac=PAC,
-                optK=optK))
+                opt_k=optK,
+                force_opt_k=force_opt_k))
 }
 
 
