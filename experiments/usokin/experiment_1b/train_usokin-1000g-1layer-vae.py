@@ -17,7 +17,7 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
     def __init__(self, debug=False):
         super(Experiment, self).__init__(debug)
 
-        self.experiment_name = "train_usokin-500g-1layer-vae"
+        self.experiment_name = "train_usokin-1000g-1layer-vae"
         if self.debug:
             self.experiment_name = "DEBUG_" + self.experiment_name
 
@@ -25,13 +25,13 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
         self.setup_logger()
         self.setup_hyperopt(n_evals=50)
 
-        self.input_size = 500
+        self.input_size = 1000
         cell_ids, features, cell_types, cell_subtypes = self.load_data()
         self.datasets = stratified_kfold(
             features, cell_subtypes,
             [cell_ids, cell_types, cell_subtypes],
             n_folds=5, convert_labels_to_int=True)
-        self.logger.info("Loaded 500g, standardized Usokin dataset")
+        self.logger.info("Loaded 1000g, standardized Usokin dataset")
 
         self.setup_cross_validation(n_folds=5,
                                     datasets=self.datasets,
@@ -39,7 +39,7 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
 
     def load_data(self):
         df = np.array(self.read_data_table(
-            "data/Usokin/processed/usokin.500g.standardized.txt"))
+            "data/Usokin/processed/usokin.1000g.standardized.txt"))
         features = df[1:, 1:-2]
 
         cell_ids = df[1:, 0]
@@ -51,10 +51,10 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
     def hyperopt_search_space(self):
         return {
             "encoder_layer_sizes": [
-                hp.choice("layer1", list(range(200, 550, 50)))
+                hp.choice("layer1", list(range(500, 1100, 100)))
             ],
             "latent_size": hp.choice(
-                "latent_size", [10, 15, 20, 25, 50, 100, 200]),
+                "latent_size", [10, 15, 20, 25, 50, 100, 200, 300, 400, 500]),
             "activation": hp.choice(
                 "activation", ["elu", "relu", "sigmoid", "tanh"]),
             "batch_size": hp.choice(

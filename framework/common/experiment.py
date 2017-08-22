@@ -10,6 +10,7 @@ from time import gmtime, strftime
 
 import six
 import numpy as np
+from collections import Iterable
 from hyperopt import fmin, tpe, Trials, space_eval, STATUS_OK, STATUS_FAIL
 
 from framework.common.dataset import Dataset
@@ -169,23 +170,29 @@ class CrossValidationExperiment(BaseExperiment):
                         batch_size=batch_size,
                         validation_dataset=valid_dataset)
 
+            eval_metrics = model.evaluate(valid_dataset)
+            if not isinstance(eval_metrics, Iterable):
+                eval_metrics = [eval_metrics]
+
             fold_valid_metrics = dict(zip(model.keras_model.metrics_names,
-                                          model.evaluate(valid_dataset)))
-            if np.any(np.isnan(fold_valid_metrics.values())) or \
-                    np.any(np.isinf(fold_valid_metrics.values())):
+                                          eval_metrics))
+
+            if np.any(np.isnan(list(fold_valid_metrics.values()))) or \
+                    np.any(np.isinf(list(fold_valid_metrics.values()))):
                 for key in fold_valid_metrics.keys():
                     avg_valid_metrics[key] = None
                 status = STATUS_FAIL
                 break
             else:
-                if self.logger is not None:
-                    self.logger.info("")
-
-                for k, v in fold_valid_metrics.items():
-                    if k in avg_valid_metrics:
-                        avg_valid_metrics[k] += v
+                for name, value in fold_valid_metrics.items():
+                    if name in avg_valid_metrics:
+                        avg_valid_metrics[name] += value
                     else:
-                        avg_valid_metrics[k] = v
+                        avg_valid_metrics[name] = value
+
+                    if self.logger is not None:
+                        self.logger.info("{}|Fold #{}|{} = {:f}".format(
+                            model_config["name"], k + 1, name, value))
 
             if self.debug:
                 break
@@ -206,7 +213,7 @@ class CrossValidationExperiment(BaseExperiment):
             "avg_valid_metrics": avg_valid_metrics
         }
 
-    def train_final_model(self, model_config, epochs = 100, batch_size=None):
+    def train_final_model(self, model_config, epochs=100, batch_size=None):
         model_dir = self.get_model_dir(model_config["name"])
         self.create_dir(model_dir)
         model_config["model_dir"] = model_dir
@@ -229,8 +236,13 @@ class CrossValidationExperiment(BaseExperiment):
         model.train(full_dataset, epochs=epochs,
                     batch_size=batch_size,
                     validation_dataset=full_dataset)
+
+        eval_metrics = model.evaluate(full_dataset)
+        if not isinstance(eval_metrics, Iterable):
+            eval_metrics = [eval_metrics]
+
         metrics = dict(zip(model.keras_model.metrics_names,
-                           model.evaluate(full_dataset)))
+                           eval_metrics))
 
         if self.logger is not None:
             for k, v in metrics.items():

@@ -4,28 +4,35 @@ from __future__ import (
 
 import importlib
 import sys
-import tensorflow as tf
+import argparse
+import numpy as np
 
 
-flags = tf.app.flags
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("experiment", help="Name of the experiment to run",
+                        type=str)
+    parser.add_argument("-d", "--debug", help="Debug mode",
+                        action="store_true")
+    parser.add_argument("-s", "--seed",
+                        help="Seed to use for reproducible results",
+                        type=int)
+    args = parser.parse_args()
 
-flags.DEFINE_string("e", "", "Name of the experiment to run")
-flags.DEFINE_boolean("d", False, "Debug mode")
-
-def main(_):
-    run_config = flags.FLAGS.__flags.copy()
-
-    if run_config["e"] == "":
-        sys.exit("Error: Must provide an experiment name")
+    if args.seed:
+        np.random.seed(args.seed)
+        import tensorflow as tf
+        tf.set_random_seed(args.seed)
 
     try:
-        module = importlib.import_module(
-            "experiments.{}".format(run_config["e"]))
+        experiment_module = importlib.import_module(
+            "experiments.{}".format(args.experiment))
     except ImportError as err:
         sys.exit("Error importing experiment: {}".format(err))
     else:
-        experiment = module.Experiment(debug=run_config["d"])
+        experiment = experiment_module.Experiment(debug=args.debug)
         experiment.run()
 
+
 if __name__ == '__main__':
-    tf.app.run()
+    main()

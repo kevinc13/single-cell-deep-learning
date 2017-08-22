@@ -18,7 +18,40 @@ from .parser import DefinitionParser
 
 
 class DeepAutoencoder(BaseModel):
+    """
+    Deep Autoencoder
+    """
+    def __init__(self, config, restore=False):
+        """
+        Initializes a deep autoencoder model
+
+        Args:
+            config: Dictionary of configuration settings
+            restore: Whether to restore a previously saved model
+        """
+        self.x = None
+        self.bernoulli = False
+        self.encoder_layers = []
+        self.decoder_layers = []
+        self.reconstructions = None
+
+        self.encoder_model = None
+        self.keras_model = None
+
+        super(DeepAutoencoder, self).__init__(config, restore=restore)
+
+    def setup(self):
+        if "bernoulli" in self.config:
+            self.bernoulli = self.config["bernoulli"]
+        else:
+            raise Exception(
+                "Must specify whether the model output follows a Bernoulli \
+                distribution or continuous (Gaussian) distribution")
+
     def build(self):
+        """
+        Builds the Keras model
+        """
         encoder_layer_defs = self.config["encoder_layers"]
 
         if "decoder_layers" in self.config:
@@ -57,9 +90,16 @@ class DeepAutoencoder(BaseModel):
 
         last_layer = self.decoder_layers[-1] \
             if len(self.decoder_layers) > 0 else self.encoder_layers[-1]
-        self.reconstructions = Dense(
-            self.config["input_size"], activation="sigmoid"
-        )(last_layer)
+
+        if self.bernoulli:
+            self.reconstructions = Dense(
+                self.config["input_size"], activation="sigmoid"
+            )(last_layer)
+        else:
+            self.reconstructions = Dense(
+                self.config["input_size"], activation="linear"
+            )(last_layer)
+
         self.keras_model = Model(self.x, self.reconstructions)
 
         metrics = [] if "metrics" not in self.config else \
@@ -70,38 +110,35 @@ class DeepAutoencoder(BaseModel):
             loss=self.config["loss"],
             metrics=metrics)
 
-        if "pretraining_weights_and_biases" in self.config:
-            self.load_pretraining_weights_and_biases()
-
-    def load_pretraining_weights_and_biases(self):
-        """
-        Load weights and biases from unsupervised pretraining step
-        """
-        dense_layer_counter = 0
-        for layer in self.keras_model.layers[1:]:
-            if isinstance(layer, Dense):
-                layer.set_weights(
-                    self.config["pretraining_weights_and_biases"][
-                        dense_layer_counter])
-                dense_layer_counter += 1
-
     def train(self, train_dataset,
-              batch_size=100, epochs=100,
-              validation_dataset=None):
+              epochs=50, batch_size=100, validation_dataset=None):
+        """
+        Train the model
+
+        Args:
+            train_dataset: Dataset of training examples
+            epochs: Maximum number of training epochs
+            batch_size: Mini-batch size to use
+            validation_dataset:
+                Optional Dataset of validation examples
+
+        Returns:
+            Keras History object
+        """
         if validation_dataset is not None:
-            self.keras_model.fit(train_dataset.features,
-                                 train_dataset.features,
-                                 batch_size=batch_size, epochs=epochs,
-                                 callbacks=self.callbacks, verbose=2,
-                                 validation_data=(
-                                     validation_dataset.features,
-                                     validation_dataset.features
-                                 ))
+            return self.keras_model.fit(train_dataset.features,
+                                        train_dataset.features,
+                                        batch_size=batch_size, epochs=epochs,
+                                        shuffle=True, callbacks=self.callbacks,
+                                        verbose=2, validation_data=(
+                                            validation_dataset.features,
+                                            validation_dataset.features))
         else:
-            self.keras_model.fit(train_dataset.features,
-                                 train_dataset.features,
-                                 batch_size=batch_size, epochs=epochs,
-                                 callbacks=self.callbacks, verbose=2)
+            return self.keras_model.fit(train_dataset.features,
+                                        train_dataset.features,
+                                        batch_size=batch_size, epochs=epochs,
+                                        shuffle=True, callbacks=self.callbacks,
+                                        verbose=2)
 
     def encode(self, x, batch_size=100):
         return self.encoder_model.predict(
@@ -118,12 +155,18 @@ class DeepAutoencoder(BaseModel):
 
 
 class DenoisingAutoencoder(DeepAutoencoder):
+    def __init__(self, config, restore=False):
+        self.x_noise = None
+        self.noise_stdev = 0.0
+        super(DenoisingAutoencoder, self).__init__(config, restore=restore)
+
     def setup(self):
         if "noise_stdev" in self.config:
             self.noise_stdev = self.config["noise_stdev"]
         else:
             raise Exception(
                 "Must specify std. deviation of Gaussian noise distribution")
+
         super(DenoisingAutoencoder, self).setup()
 
     def build(self):
@@ -175,7 +218,22 @@ class DenoisingAutoencoder(DeepAutoencoder):
             metrics=self.config["metrics"])
 
 
-class VariationalAutoencoder(BaseModel):
+class VariationalAutoencoder(DeepAutoencoder):
+    def __init__(self, config, restore=False):
+        self.latent_size = None
+        self.warmup_beta = None
+
+        self.generator_layers = []
+
+        self.z_mean = None
+        self.z_log_var = None
+        self.z = None
+
+        self.generator_x = None
+        self.generator_model = None
+
+        super(VariationalAutoencoder, self).__init__(config, restore=restore)
+
     def setup(self):
         if "latent_size" in self.config:
             self.latent_size = self.config["latent_size"]
@@ -184,12 +242,7 @@ class VariationalAutoencoder(BaseModel):
                 "Must specify size of latent representation in the \
                 variational autoencoder model configuration")
 
-        if "bernoulli" in self.config:
-            self.bernoulli = self.config["bernoulli"]
-        else:
-            raise Exception(
-                "Must specify whether VAE output follows a Bernoulli \
-                distribution or continuous (Gaussian) distribution")
+        super(VariationalAutoencoder, self).setup()
 
     def build(self):
         encoder_layer_defs = self.config["encoder_layers"]
@@ -208,7 +261,6 @@ class VariationalAutoencoder(BaseModel):
                 on_epoch_end=lambda epoch, logs: self._warmup(epoch)))
 
         # Encoder
-        self.encoder_layers = []
         for index, layer_def in enumerate(encoder_layer_defs):
             layer_ref, args, kw_args = \
                 DefinitionParser.parse_layer_definition(layer_def)
@@ -228,9 +280,6 @@ class VariationalAutoencoder(BaseModel):
         self.encoder_model = Model(self.x, self.z)
 
         # Decoder and Generator Models
-        self.decoder_layers = []
-        self.generator_layers = []
-
         self.generator_x = Input(shape=(self.latent_size,))
 
         for index, layer_def in enumerate(decoder_layer_defs):
@@ -296,7 +345,7 @@ class VariationalAutoencoder(BaseModel):
         reconstruction_loss = self.reconstruction_loss(y_true, y_pred)
         kl_divergence_loss = self.kl_divergence_loss(y_true, y_pred)
 
-        if hasattr(self, "warmup_beta"):
+        if hasattr(self, "warmup_beta") and self.warmup_beta is not None:
             return K.mean(
                 reconstruction_loss + self.warmup_beta * kl_divergence_loss)
         else:
@@ -313,7 +362,7 @@ class VariationalAutoencoder(BaseModel):
                 0.5 * K.square(y_true - y_pred) / K.exp(self.decoder_log_var),
                 axis=-1)
 
-    def kl_divergence_loss(self, y_true, y_pred):
+    def kl_divergence_loss(self, *_):
         return -0.5 * K.sum(
             1 + self.z_log_var - K.exp(self.z_log_var) - K.square(self.z_mean),
             axis=-1)
@@ -323,33 +372,6 @@ class VariationalAutoencoder(BaseModel):
         warmup_beta = (epoch / n_epochs) * (epoch <= n_epochs) + \
             1.0 * (epoch > n_epochs)
         K.set_value(self.warmup_beta, warmup_beta)
-
-    def train(self, train_dataset,
-              epochs=50, batch_size=100,
-              validation_dataset=None):
-        if validation_dataset is not None:
-            self.keras_model.fit(train_dataset.features,
-                                 train_dataset.features,
-                                 batch_size=batch_size, epochs=epochs,
-                                 shuffle=True, callbacks=self.callbacks,
-                                 verbose=2, validation_data=(
-                                     validation_dataset.features,
-                                     validation_dataset.features))
-        else:
-            self.keras_model.fit(train_dataset.features,
-                                 train_dataset.features,
-                                 batch_size=batch_size, epochs=epochs,
-                                 shuffle=True, callbacks=self.callbacks,
-                                 verbose=2)
-
-    def evaluate(self, valid_dataset, batch_size=50):
-        return self.keras_model.evaluate(
-            valid_dataset.features, valid_dataset.features,
-            batch_size=batch_size, verbose=0)
-
-    def encode(self, x, batch_size=50):
-        return self.encoder_model.predict(
-            x, batch_size=batch_size, verbose=0)
 
     def generate(self, z, batch_size=50):
         return self.generator_model.predict(

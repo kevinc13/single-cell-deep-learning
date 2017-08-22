@@ -3,7 +3,6 @@ library(data.table)
 # ---------- Configuration ---------- #
 
 exp_name <- "DEBUG_train_usokin-100g-1layer-ae"
-model_name <- "UsokinAE_BestLoss"
 
 # ---------- Load Helper Files ---------- #
 setwd("~/Documents/Research/XinghuaLuLab/single-cell-deep-learning/scripts/benchmark-vae")
@@ -14,16 +13,18 @@ source("tsne.R")
 
 project_dir <- "~/Documents/Research/XinghuaLuLab/single-cell-deep-learning/results"
 exp_dir <- paste(project_dir, "/", exp_name, sep="")
+model_name <- list.files(exp_dir, include.dirs=TRUE,
+                         pattern="*AE_BestLoss")[1]
 model_dir <- paste(exp_dir, "/", model_name, sep="")
 setwd(model_dir)
 
 df <- fread("latent_representations.txt",
-                     header=TRUE,
-                     data.table=FALSE)
+            header=TRUE,
+            data.table=FALSE)
 
-latent_reps <- df[,2:(ncol(df)-1)]
+latent_reps <- df[,2:(ncol(df)-2)]
 cell_types <- df$cell_type
-# cell_subtypes <- df$cell_subtype
+cell_subtypes <- df$cell_subtype
 
 # ---------- Consensus Clustering ---------- #
 # params <- c("km_euclidean", "pam_euclidean", "pam_pearson")
@@ -32,12 +33,12 @@ cell_types <- df$cell_type
 # for (param in params) {
 #     alg <- strsplit(param, "_")[[1]][1]
 #     dist <- strsplit(param, "_")[[1]][2]
-#     
+# 
 #     clust <- cluster_latent_reps(latent_reps, cell_types,
 #                                  model_dir, 4, force_opt_k=4,
 #                                  clusterAlg=alg, dist=dist,
 #                                  plot=TRUE)
-#     
+# 
 #     row <- data.frame("opt_k"=clust$opt_k,
 #                       "pac_opt_k"=clust$pac[
 #                           paste("k", clust$opt_k, sep="")],

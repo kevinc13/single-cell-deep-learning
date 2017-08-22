@@ -17,7 +17,7 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
     def __init__(self, debug=False):
         super(Experiment, self).__init__(debug)
 
-        self.experiment_name = "train_usokin-500g-1layer-vae"
+        self.experiment_name = "train_usokin-500g-3layer-vae"
         if self.debug:
             self.experiment_name = "DEBUG_" + self.experiment_name
 
@@ -51,10 +51,12 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
     def hyperopt_search_space(self):
         return {
             "encoder_layer_sizes": [
-                hp.choice("layer1", list(range(200, 550, 50)))
+                hp.choice("layer1", [400, 450, 500]),
+                hp.choice("layer2", [250, 300, 350]),
+                hp.choice("layer3", [100, 150, 200])
             ],
             "latent_size": hp.choice(
-                "latent_size", [10, 15, 20, 25, 50, 100, 200]),
+                "latent_size", [10, 15, 20, 25, 50, 100]),
             "activation": hp.choice(
                 "activation", ["elu", "relu", "sigmoid", "tanh"]),
             "batch_size": hp.choice(
@@ -92,6 +94,14 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
         encoder_layers = [
             "Dense:{}:activation='{}'".format(
                 case_config["encoder_layer_sizes"][0],
+                case_config["activation"]),
+            "BatchNormalization",
+            "Dense:{}:activation='{}'".format(
+                case_config["encoder_layer_sizes"][1],
+                case_config["activation"]),
+            "BatchNormalization",
+            "Dense:{}:activation='{}'".format(
+                case_config["encoder_layer_sizes"][2],
                 case_config["activation"]),
             "BatchNormalization"
         ]

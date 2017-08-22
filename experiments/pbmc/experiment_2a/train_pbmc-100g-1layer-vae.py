@@ -17,7 +17,7 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
     def __init__(self, debug=False):
         super(Experiment, self).__init__(debug)
 
-        self.experiment_name = "train_usokin-500g-1layer-vae"
+        self.experiment_name = "train_pbmc-100g-1layer-vae"
         if self.debug:
             self.experiment_name = "DEBUG_" + self.experiment_name
 
@@ -25,13 +25,13 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
         self.setup_logger()
         self.setup_hyperopt(n_evals=50)
 
-        self.input_size = 500
-        cell_ids, features, cell_types, cell_subtypes = self.load_data()
+        self.input_size = 100
+        cell_ids, features, cell_types = self.load_data()
         self.datasets = stratified_kfold(
-            features, cell_subtypes,
-            [cell_ids, cell_types, cell_subtypes],
+            features, cell_types,
+            [cell_ids, cell_types],
             n_folds=5, convert_labels_to_int=True)
-        self.logger.info("Loaded 500g, standardized Usokin dataset")
+        self.logger.info("Loaded 100g, standardized GSE94820 PBMC dataset")
 
         self.setup_cross_validation(n_folds=5,
                                     datasets=self.datasets,
@@ -39,22 +39,21 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
 
     def load_data(self):
         df = np.array(self.read_data_table(
-            "data/Usokin/processed/usokin.500g.standardized.txt"))
-        features = df[1:, 1:-2]
+            "data/GSE94820_PBMC/processed/pbmc.100g.standardized.txt"))
+        features = df[1:, 1:-1]
 
         cell_ids = df[1:, 0]
-        cell_types = df[1:, -2]
-        cell_subtypes = df[1:, -1]
+        cell_types = df[1:, -1]
 
-        return cell_ids, features, cell_types, cell_subtypes
+        return cell_ids, features, cell_types
 
     def hyperopt_search_space(self):
         return {
             "encoder_layer_sizes": [
-                hp.choice("layer1", list(range(200, 550, 50)))
+                hp.choice("layer1", [50, 100])
             ],
             "latent_size": hp.choice(
-                "latent_size", [10, 15, 20, 25, 50, 100, 200]),
+                "latent_size", [10, 15, 20, 25, 50]),
             "activation": hp.choice(
                 "activation", ["elu", "relu", "sigmoid", "tanh"]),
             "batch_size": hp.choice(
@@ -87,7 +86,7 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
             "early_stopping_patience": 5
         }
 
-        model_name = "{}_UsokinVAE".format(self.case_counter)
+        model_name = "{}_PBMCVAE".format(self.case_counter)
         model_dir = self.get_model_dir(model_name)
         encoder_layers = [
             "Dense:{}:activation='{}'".format(
@@ -132,15 +131,13 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
         results = np.hstack((
             np.expand_dims(full_dataset.sample_data[0], axis=1),
             latent_reps,
-            np.expand_dims(full_dataset.sample_data[1], axis=1),
-            np.expand_dims(full_dataset.sample_data[2], axis=1)
+            np.expand_dims(full_dataset.sample_data[1], axis=1)
         ))
 
         header = ["cell_ids"]
         for l in range(1, model_config["latent_size"] + 1):
             header.append("dim{}".format(l))
         header.append("cell_type")
-        header.append("cell_subtype")
         header = np.array(header)
 
         results = np.vstack((header, results))
@@ -192,13 +189,13 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
 
         # Train the final VAE using the best model configs
         best_loss_model_config = self.get_model_config(best_loss_case_config)
-        best_loss_model_config["name"] = "UsokinVAE_BestTotalLoss"
+        best_loss_model_config["name"] = "PBMCVAE_BestTotalLoss"
 
         best_recon_loss_model_config = sorted(losses, key=lambda x: x[1])[0][0]
-        best_recon_loss_model_config["name"] = "UsokinVAE_BestReconLoss"
+        best_recon_loss_model_config["name"] = "PBMCVAE_BestReconLoss"
 
         best_kl_loss_model_config = sorted(losses, key=lambda x: x[2])[0][0]
-        best_kl_loss_model_config["name"] = "UsokinVAE_BestKLDivergenceLoss"
+        best_kl_loss_model_config["name"] = "PBMCVAE_BestKLDivergenceLoss"
 
         self.train_final_vae(best_loss_model_config)
         self.train_final_vae(best_recon_loss_model_config)

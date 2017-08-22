@@ -92,7 +92,7 @@ class BaseModel(object):
         """
         Save model configuration to a JSON file
         """
-        with open(self.model_dir + "/config.json", "w") as f:
+        with open("{}/config.json".format(self.model_dir), "w") as f:
             json.dump(self.config, f)
 
     @classmethod
@@ -100,7 +100,7 @@ class BaseModel(object):
         """
         Load model configuration from a JSON file
         """
-        with open(model_dir + "/config.json", "r") as f:
+        with open("{}/config.json".format(model_dir), "r") as f:
             return json.load(f)
 
     def load_weights(self):

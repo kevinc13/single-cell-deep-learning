@@ -30,10 +30,10 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
         self.datasets = stratified_kfold(
             features, cell_subtypes,
             [cell_ids, cell_types, cell_subtypes],
-            n_folds=10, convert_labels_to_int=True)
+            n_folds=5, convert_labels_to_int=True)
         self.logger.info("Loaded 100g, standardized Usokin dataset")
 
-        self.setup_cross_validation(n_folds=10,
+        self.setup_cross_validation(n_folds=5,
                                     datasets=self.datasets,
                                     model_class=VAE)
 
@@ -55,7 +55,7 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
                 hp.choice("layer2", [25, 50])
             ],
             "latent_size": hp.choice(
-                "latent_size", [10, 15, 20, 25, 50, 100]),
+                "latent_size", [10, 15, 20, 25]),
             "activation": hp.choice(
                 "activation", ["elu", "relu", "sigmoid", "tanh"]),
             "batch_size": hp.choice(
@@ -73,11 +73,6 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
                             "sgd_lr", -8 * log(10), -4 * log(10)),
                         "momentum": hp.choice(
                             "sgd_momentum", [0.5, 0.9, 0.95, 0.99])
-                    },
-                    {
-                        "name": "rmsprop",
-                        "lr": hp.loguniform(
-                            "rmsprop_lr", -6 * log(10), -1 * log(10))
                     }
                 ])
         }
@@ -142,13 +137,15 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
         results = np.hstack((
             np.expand_dims(full_dataset.sample_data[0], axis=1),
             latent_reps,
-            np.expand_dims(full_dataset.sample_data[1], axis=1)
+            np.expand_dims(full_dataset.sample_data[1], axis=1),
+            np.expand_dims(full_dataset.sample_data[2], axis=1)
         ))
 
         header = ["cell_ids"]
         for l in range(1, model_config["latent_size"] + 1):
             header.append("dim{}".format(l))
         header.append("cell_type")
+        header.append("cell_subtype")
         header = np.array(header)
 
         results = np.vstack((header, results))

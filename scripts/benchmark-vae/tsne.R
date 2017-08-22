@@ -33,7 +33,7 @@ tsne_latent_reps <- function(x, labels, base_dir, plot=TRUE, pca=TRUE) {
     # ---------- Plot ---------- #
     if (plot) {
         cat("Plotting t-SNE projections...")
-        plot <- ggplot(projections, aes(x=dim1, y=dim2, color=cell_types)) +
+        plot <- ggplot(projections, aes(x=dim1, y=dim2, color=labels)) +
             geom_point() +
             ggtitle("t-SNE Plot")
         ggsave("tSNE_plot.png",
