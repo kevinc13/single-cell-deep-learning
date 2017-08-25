@@ -125,11 +125,14 @@ class CrossValidationExperiment(BaseExperiment):
         super(CrossValidationExperiment, self).__init__(debug)
         self.case_counter = 0
         self.n_folds = 0
+        self.epochs = 100
         self.model_class = None
         self.datasets = []
 
-    def setup_cross_validation(self, n_folds, datasets, model_class):
+    def setup_cross_validation(self, n_folds, datasets, model_class,
+                               epochs=100):
         self.n_folds = n_folds
+        self.epochs = epochs
         self.datasets = datasets
         self.model_class = model_class
 
@@ -137,7 +140,7 @@ class CrossValidationExperiment(BaseExperiment):
         raise Exception("Experiment must implement the \
                         'get_model_config' method")
 
-    def train_case_model(self, case_config, epochs=100,
+    def train_case_model(self, case_config,
                          batch_size=None, loss_metric="loss"):
         model_config = self.get_model_config(case_config)
         self.create_dir(model_config["model_dir"])
@@ -164,9 +167,9 @@ class CrossValidationExperiment(BaseExperiment):
                     raise Exception("No batch size specified \
                                     for model training")
 
-            if self.debug: epochs = 2
+            if self.debug: self.epochs = 2
             model.train(train_dataset,
-                        epochs=epochs,
+                        epochs=self.epochs,
                         batch_size=batch_size,
                         validation_dataset=valid_dataset)
 
@@ -200,6 +203,7 @@ class CrossValidationExperiment(BaseExperiment):
         if status != STATUS_FAIL:
             for name, metric in avg_valid_metrics.items():
                 metric /= self.n_folds
+                avg_valid_metrics[name] = metric
                 if self.logger is not None:
                     self.logger.info("{}|Avg {} = {:f}".format(
                         model_config["name"], name, metric))
@@ -213,7 +217,7 @@ class CrossValidationExperiment(BaseExperiment):
             "avg_valid_metrics": avg_valid_metrics
         }
 
-    def train_final_model(self, model_config, epochs=100, batch_size=None):
+    def train_final_model(self, model_config, batch_size=None):
         model_dir = self.get_model_dir(model_config["name"])
         self.create_dir(model_dir)
         model_config["model_dir"] = model_dir
@@ -232,10 +236,9 @@ class CrossValidationExperiment(BaseExperiment):
                 model_config["name"]))
 
         model = self.model_class(model_config)
-        if self.debug: epochs = 2
-        model.train(full_dataset, epochs=epochs,
-                    batch_size=batch_size,
-                    validation_dataset=full_dataset)
+        if self.debug: self.epochs = 2
+        model.train(full_dataset, epochs=self.epochs,
+                    batch_size=batch_size)
 
         eval_metrics = model.evaluate(full_dataset)
         if not isinstance(eval_metrics, Iterable):

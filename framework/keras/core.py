@@ -67,9 +67,13 @@ class BaseModel(object):
 
         if self.model_dir is not None:
             if "checkpoint" in self.config and self.config["checkpoint"]:
+                checkpoint_metric = "val_loss" \
+                    if "checkpoint_metric" not in self.config else \
+                    self.config["checkpoint_metric"]
+
                 self.callbacks.append(ModelCheckpoint(
                     self.model_dir + "/keras_model.weights.h5",
-                    monitor="val_loss", verbose=0,
+                    monitor=checkpoint_metric, verbose=0,
                     save_best_only=True, save_weights_only=True))
             self.callbacks.append(TimeLogger())
             self.callbacks.append(FileLogger(

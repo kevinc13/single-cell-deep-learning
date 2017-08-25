@@ -1,20 +1,28 @@
 import six
 import csv
+import os
 
 from framework.common.dataset import Dataset
 from framework.common.sampling import stratified_kfold
 from framework.keras.autoencoder import VariationalAutoencoder as VAE
 import numpy as np
 
-exp_name = "train_usokin-100g-standardized-1layer-vae"
-ref_model = "33_UsokinVAE"
+exp_name = "train_usokin-1000g-2layer-vae"
+ref_model = "11_UsokinVAE"
 model_config = VAE.load_config("results/{}/{}".format(exp_name, ref_model))
-model_config["name"] = "53_UsokinVAE_FINAL"
+model_config["name"] = "UsokinVAE_BestTotalLoss"
 model_config["model_dir"] = \
     "/pylon5/mc4s8ap/kchen8/single-cell-deep-learning/results/{}/{}".format(
         exp_name, model_config["name"])
 model_config["tensorboard"] = True
+model_config["bernoulli"] = False
 model_config["checkpoint"] = True
+model_config["early_stopping_metric"] = "loss"
+model_config["checkpoint_metric"] = "loss"
+
+if not os.path.exists(model_config["model_dir"]):
+    os.makedirs(model_config["model_dir"])
+
 
 def read_data_table(filepath, delimiter="\t"):
     with open(filepath, "r") as f:
@@ -22,11 +30,12 @@ def read_data_table(filepath, delimiter="\t"):
         for line in f.readlines():
             data.append(line.replace("\n", "").split(delimiter))
 
-        return data 
+        return data
+
 
 def load_data():
     df = np.array(read_data_table(
-        "data/Usokin/processed/usokin.100g.standardized.txt"))
+        "data/Usokin/processed/usokin.1000g.standardized.txt"))
     features = df[1:, 1:-2]
 
     cell_ids = df[1:, 0]
@@ -34,6 +43,7 @@ def load_data():
     cell_subtypes = df[1:, -1]
 
     return cell_ids, features, cell_types, cell_subtypes
+
 
 def save_data_table(data, filepath, root=None, delimiter="\t"):
     if root is not None:
@@ -47,26 +57,26 @@ def save_data_table(data, filepath, root=None, delimiter="\t"):
         for r in data:
             writer.writerow(r)
 
+
 cell_ids, features, cell_types, cell_subtypes = load_data()
 
 datasets = stratified_kfold(
     features, cell_subtypes,
     [cell_ids, cell_types, cell_subtypes],
-    n_folds=10, convert_labels_to_int=True)
+    n_folds=5, convert_labels_to_int=True)
 full_dataset = Dataset.concatenate(*datasets)
-n_epochs = 100
+n_epochs = 200
 
 final_vae = VAE(model_config)
 final_vae.train(full_dataset,
-                epochs=n_epochs, batch_size=model_config["batch_size"],
-                validation_dataset=full_dataset)
+                epochs=n_epochs, batch_size=model_config["batch_size"])
 loss = final_vae.evaluate(full_dataset)
 print(loss)
 
 latent_reps = final_vae.encode(full_dataset.features)
 results = np.hstack((
     np.expand_dims(full_dataset.sample_data[0], axis=1),
-    latent_reps, 
+    latent_reps,
     np.expand_dims(full_dataset.sample_data[1], axis=1),
     np.expand_dims(full_dataset.sample_data[2], axis=1)
 ))

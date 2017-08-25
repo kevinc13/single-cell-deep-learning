@@ -31,7 +31,7 @@ class TerminateOnNaN(Callback):
 
     def on_epoch_end(self, epoch, logs=None):
         if self.stop_training:
-            print("Epoch %d: Invalid loss, terminating training" % batch)
+            print("Epoch %d: Invalid loss, terminating training" % epoch)
             self.model.stop_training = True
 
 

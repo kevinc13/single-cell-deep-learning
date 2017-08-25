@@ -1,7 +1,9 @@
+# macOS
 .DS_Store
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
+*$py.class
 
 # Ignore large data files
 data/**
@@ -15,9 +17,12 @@ MNIST_data/
 data/**/.Rhistory
 data/**/.DS_Store
 
-# Ignore results
+# Ignore results (size considerations)
 results/*
 
 # JetBrains IDE
 .idea/
 .Rproj.user
+
+# Office Documents
+~$*.xls*
