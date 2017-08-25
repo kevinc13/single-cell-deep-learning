@@ -54,7 +54,7 @@ clusterLatentRepresentations <- function(x, labels=NA, base.dir,
                                          alg="km", dist="euclidean",
                                          plot=TRUE, colors=NA) {
     # Setup results directory
-    if (!is.na(force.k)) {
+    if (!any(is.na(force.k))) {
       results.dir <- paste(base.dir, "/consensus_clustering_",
                            paste(alg, dist, sep="_"),
                            "_maxk", max.k, sep="")
@@ -112,7 +112,7 @@ clusterLatentRepresentations <- function(x, labels=NA, base.dir,
     print(PAC)
     cat("\n")
     catln("Optimal K = ", opt.k)
-    if (!is.na(force.k)) {
+    if (!any(is.na(force.k))) {
       opt.results <- consensus.clustering.results[[force.k]]
       catln("Forcing optimal K = ", force.k)
     } else {
@@ -124,7 +124,7 @@ clusterLatentRepresentations <- function(x, labels=NA, base.dir,
     clust.assignments <- opt.results$consensusClass
 
     # Calculate clustering performance metrics
-    if (!is.na(labels)) {
+    if (!any(is.na(labels))) {
       rownames(opt.results$consensusMatrix) <- names(labels)
       colnames(opt.results$consensusMatrix) <- names(labels)
       
@@ -142,7 +142,7 @@ clusterLatentRepresentations <- function(x, labels=NA, base.dir,
     }
     
     # Plot clustering heatmap
-    if (plot) {
+    if (plot && !file.exists(paste(results.dir, "/heatmap.png", sep=""))) {
         cat("Plotting heatmap...")
         
         # If the consensus matrix has no column names, set them to index
@@ -153,7 +153,7 @@ clusterLatentRepresentations <- function(x, labels=NA, base.dir,
         
         plot.mat <- opt.results$consensusMatrix[rev(hc.order),]
 
-        if (!is.na(labels)) {
+        if (!any(is.na(labels))) {
           names(labels) <- colnames(plot.mat)
 
           annotations <- data.frame(Cluster = labels)
@@ -184,7 +184,7 @@ clusterLatentRepresentations <- function(x, labels=NA, base.dir,
                               border_color=NA,
                               fontsize=18)
 
-        if (!is.na(labels)) {
+        if (!any(is.na(labels))) {
           pheatmap.args$annotation_col <- annotations
           pheatmap.args$annotation_colors <- annotation.colors
           pheatmap.args$annotation_names_col <- FALSE
@@ -205,7 +205,7 @@ clusterLatentRepresentations <- function(x, labels=NA, base.dir,
                         opt.k=opt.k,
                         force.k=force.k)
 
-    if (!is.na(labels)) {
+    if (!any(is.na(labels))) {
       return.list$ari <- ari
       return.list$acc <- acc
     }
@@ -213,7 +213,7 @@ clusterLatentRepresentations <- function(x, labels=NA, base.dir,
     return(return.list)
 }
 
-tsneLatentReps <- function(x, labels, base.dir, plot=TRUE, pca=TRUE) {
+tsneLatentReps <- function(x, labels=NA, base.dir, plot=TRUE, pca=TRUE) {
     results.dir <- paste(base.dir, "/tSNE", sep="")
     results.file <- paste(results.dir, "/tSNE_results.Rdata", sep="")
     
@@ -240,9 +240,9 @@ tsneLatentReps <- function(x, labels, base.dir, plot=TRUE, pca=TRUE) {
     colnames(projections) <- c("dim1", "dim2")
     
     # ---------- Plot ---------- #
-    if (plot) {
+    if (plot && !file.exists(paste(results.dir, "/tSNE_plot.png", sep=""))) {
         cat("Plotting t-SNE projections...")
-        if (!is.na(labels)) {
+        if (!any(is.na(labels))) {
           tsne.plot <- ggplot(projections, aes(x=dim1, y=dim2, color=labels))  
         } else {
           tsne.plot <- ggplot(projections, aes(x=dim1, y=dim2))

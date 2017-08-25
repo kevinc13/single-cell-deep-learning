@@ -4,7 +4,7 @@
 # Author: Kevin Chen 
 # ------------------------------------------------------------------------------
 base.dir <- "~/Documents/Research/XinghuaLuLab/single-cell-deep-learning"
-setwd(paste(base_dir, "/scripts/R", sep="")
+setwd(paste(base.dir, "/scripts/R", sep=""))
 
 library(data.table)
 
@@ -17,14 +17,14 @@ model.type <- "vae"
 
 latent.reps.col.start <- 2
 latent.reps.col.end <- -2
-labels.col <- -2
+labels.col <- "cell_type"
 
 clust.alg <- "km"
 clust.dist <- "euclidean"
 max.k <- 11
 force.k <- 4
 
-# Helpers
+
 plotVAELosses <- function(model.dir) {
   setwd(model.dir)
 
@@ -53,17 +53,17 @@ plotVAELosses <- function(model.dir) {
 summarizeModelSelectionExperiment <- function(experiment.dir,
                                               model.name, model.type,
                                               latent.reps.col.start,
-                                              latent.reps.col.end,
-                                              labels.col, max.k, force.k
+                                              latent.reps.col.end, labels.col,
+                                              max.k, force.k,
                                               clust.alg="km",
                                               clust.dist="euclidean") {
   experiment.dir <- paste(base.dir, "/results/", experiment.dir, sep="")
 
   clust.results.df <- data.frame()
   for (exp.name in list.dirs(experiment.dir,
-                             recursive=FALSE, full.names=TRUE)) {
+                             recursive=FALSE, full.names=FALSE)) {
     model.dir <- paste(experiment.dir, "/",
-                       substring(exp.name, 2), "/",
+                       exp.name, "/",
                        model.name, sep="")
     
     if (model.type == "vae") {
@@ -75,17 +75,35 @@ summarizeModelSelectionExperiment <- function(experiment.dir,
       latent.reps <- df[,latent.reps.col.start:(ncol(df) + latent.reps.col.end)]
       labels <- df[,labels.col]
       
-      evaluation <- evaluateVAE(model.dir, latent.reps, labels,
-                                clust.alg=clust.alg, clust.dist=clust.dist,
-                                max.k=max.k, force.k=force.k)
-      catln("Finished evaluating: ", exp)
+      evaluation <- evaluateLatentRepresentations(model.dir,
+                                                  latent.reps, labels,
+                                                  clust.alg, clust.dist,
+                                                  max.k, force.k=force.k)
+      catln("Finished evaluating: ", exp.name)
     } else if (model.type == "ae") {
       stop("Haven't implemented this yet")
     } else {
       stop("Invalid model type, must be one of the following: 'vae', 'ae'")
     }
-
+    
+    rownames(evaluation$clustering.results)[1] <- exp.name
     clust.results.df <- rbind(clust.results.df, evaluation$clustering.results)
+    print(clust.results.df)
+  }
+  
+  if (!file.exists(paste(experiment.dir, 
+                         "/clustering_results.txt", sep=""))) {
+    write.table(clust.results.df,
+                file=paste(experiment.dir,
+                           "/clustering_results.txt", sep=""),
+                row.names=TRUE, col.names=TRUE)
   }
 }
 
+
+summarizeModelSelectionExperiment(experiment.dir,
+                                  model.name, model.type,
+                                  latent.reps.col.start,
+                                  latent.reps.col.end, labels.col,
+                                  max.k, force.k,
+                                  clust.alg=clust.alg, clust.dist=clust.dist)
