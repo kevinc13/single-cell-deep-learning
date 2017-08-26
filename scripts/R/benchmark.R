@@ -11,9 +11,9 @@ library(data.table)
 source("evaluation.R")
 
 # Configuration ----------------------------------------------------------------
-experiment.dir <- "usokin/experiment_1c"
-model.name <- "UsokinVAE_BestTotalLoss"
-model.type <- "vae"
+experiment.dir <- "usokin/experiment_1d"
+model.name <- "UsokinAE_BestLoss"
+model.type <- "ae"
 
 latent.reps.col.start <- 2
 latent.reps.col.end <- -2
@@ -66,37 +66,34 @@ summarizeModelSelectionExperiment <- function(experiment.dir,
                        exp.name, "/",
                        model.name, sep="")
     
-    if (model.type == "vae") {
-      # Load latent representations
-      df <- fread(paste(model.dir, "/latent_representations.txt", sep=""),
-                  header=TRUE,
-                  data.table=FALSE)
-
-      latent.reps <- df[,latent.reps.col.start:(ncol(df) + latent.reps.col.end)]
-      labels <- df[,labels.col]
-      
-      evaluation <- evaluateLatentRepresentations(model.dir,
-                                                  latent.reps, labels,
-                                                  clust.alg, clust.dist,
-                                                  max.k, force.k=force.k)
-      catln("Finished evaluating: ", exp.name)
-    } else if (model.type == "ae") {
-      stop("Haven't implemented this yet")
-    } else {
-      stop("Invalid model type, must be one of the following: 'vae', 'ae'")
-    }
+    # Load latent representations
+    df <- fread(paste(model.dir, "/latent_representations.txt", sep=""),
+                header=TRUE,
+                data.table=FALSE)
+    
+    latent.reps <- df[,latent.reps.col.start:(ncol(df) + latent.reps.col.end)]
+    labels <- df[,labels.col]
+    
+    evaluation <- evaluateLatentRepresentations(model.dir,
+                                                latent.reps, labels,
+                                                clust.alg, clust.dist,
+                                                max.k, force.k=force.k)
+    catln("Finished evaluating: ", exp.name)
     
     rownames(evaluation$clustering.results)[1] <- exp.name
     clust.results.df <- rbind(clust.results.df, evaluation$clustering.results)
-    print(clust.results.df)
   }
   
   if (!file.exists(paste(experiment.dir, 
                          "/clustering_results.txt", sep=""))) {
+    clust.results.df <- cbind(rownames(clust.results.df),
+                              clust.results.df)
+    colnames(clust.results.df)[1] <- "model"
     write.table(clust.results.df,
                 file=paste(experiment.dir,
                            "/clustering_results.txt", sep=""),
-                row.names=TRUE, col.names=TRUE)
+                row.names=TRUE, col.names=TRUE,
+                sep="\t", quote=FALSE)
   }
 }
 
