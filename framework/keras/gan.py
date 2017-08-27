@@ -8,8 +8,11 @@ class GAN(BaseModel):
     def __init__(self, config, restore=False):
         self.latent_size = None
 
-        self.generator_layers = None
-        self.discriminator_layers = None
+        self.generator_x = None
+        self.generator_layers = []
+
+        self.discriminator_x = None
+        self.discriminator_layers = []
 
         self.generator_model = None
         self.discriminator_model = None
@@ -25,7 +28,7 @@ class GAN(BaseModel):
                             "generator's noise prior")
 
     def build(self):
-        generator_x = Input(shape=(self.latent_size,))
+        self.generator_x = Input(shape=(self.latent_size,))
         generator_layer_defs = self.config["generator_layers"]
 
         # Generator
@@ -35,11 +38,13 @@ class GAN(BaseModel):
             layer = layer_ref(*args, **kw_args)
 
             if index == 0:
-                self.generator_layers.append(layer(self.x))
+                self.generator_layers.append(layer(self.generator_x))
             else:
                 self.generator_layers.append(layer(self.generator_layers[-1]))
 
-        discriminator_x = Input(shape=(self.config["input_size"],))
+        self.generator_model = 
+
+        self.discriminator_x = Input(shape=(self.config["input_size"],))
         discriminator_layer_defs = self.config["discriminator_layers"]
 
         pass

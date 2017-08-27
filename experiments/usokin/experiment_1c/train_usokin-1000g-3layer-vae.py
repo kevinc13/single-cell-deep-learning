@@ -100,6 +100,10 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
             "Dense:{}:activation='{}'".format(
                 case_config["encoder_layer_sizes"][1],
                 case_config["activation"]),
+            "BatchNormalization",
+            "Dense:{}:activation='{}'".format(
+                case_config["encoder_layer_sizes"][2],
+                case_config["activation"]),
             "BatchNormalization"
         ]
 

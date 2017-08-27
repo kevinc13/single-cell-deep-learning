@@ -7,13 +7,14 @@ base.dir <- "~/Documents/Research/XinghuaLuLab/single-cell-deep-learning"
 setwd(paste(base.dir, "/scripts/R", sep=""))
 
 library(data.table)
+library(rjson)
 
 source("evaluation.R")
 
 # Configuration ----------------------------------------------------------------
-experiment.dir <- "usokin/experiment_1d"
-model.name <- "UsokinAE_BestLoss"
-model.type <- "ae"
+experiment.dir <- "usokin/experiment_1c"
+model.name <- "UsokinVAE_BestTotalLoss"
+model.type <- "vae"
 
 latent.reps.col.start <- 2
 latent.reps.col.end <- -2
@@ -70,9 +71,11 @@ summarizeModelSelectionExperiment <- function(experiment.dir,
     df <- fread(paste(model.dir, "/latent_representations.txt", sep=""),
                 header=TRUE,
                 data.table=FALSE)
-    
     latent.reps <- df[,latent.reps.col.start:(ncol(df) + latent.reps.col.end)]
     labels <- df[,labels.col]
+    
+    # Load model configuration
+    model.config <- fromJSON(file=paste(model.dir, "/config.json", sep=""))
     
     evaluation <- evaluateLatentRepresentations(model.dir,
                                                 latent.reps, labels,
@@ -81,18 +84,47 @@ summarizeModelSelectionExperiment <- function(experiment.dir,
     catln("Finished evaluating: ", exp.name)
     
     rownames(evaluation$clustering.results)[1] <- exp.name
-    clust.results.df <- rbind(clust.results.df, evaluation$clustering.results)
+    row <- evaluation$clustering.results
+    
+    if (model.type == "vae") {
+      model.info <- data.frame(model_name=model.config$name,
+                               n_genes=model.config$input_size,
+                               n_layers=length(model.config$encoder_layers),
+                               encoder_layers=paste(
+                                 model.config$encoder_layers, collapse="|"),
+                               n_latent_dim=model.config$latent_size,
+                               optimizer=model.config$optimizer,
+                               batch_size=model.config$batch_size) 
+    } else if (model.type == "ae") {
+      model.info <- data.frame(model_name=model.config$name,
+                               n_genes=model.config$input_size,
+                               n_layers=length(model.config$encoder_layers) - 1,
+                               encoder_layers=paste(
+                                 model.config$encoder_layers[
+                                   1:(length(model.config$encoder_layers) - 1)],
+                                 collapse="|"),
+                               n_latent_dim=strsplit(
+                                 tail(model.config$encoder_layers, n=1),
+                                 ":")[[1]][2],
+                               optimizer=model.config$optimizer,
+                               batch_size=model.config$batch_size)
+    } else {
+      stop("Invalid model type; must be either 'vae' or 'ae'")
+    }
+    
+    row <- cbind(model.info, row)
+    clust.results.df <- rbind(clust.results.df, row)
   }
   
   if (!file.exists(paste(experiment.dir, 
                          "/clustering_results.txt", sep=""))) {
-    clust.results.df <- cbind(rownames(clust.results.df),
-                              clust.results.df)
-    colnames(clust.results.df)[1] <- "model"
+    # clust.results.df <- cbind(rownames(clust.results.df),
+    #                           clust.results.df)
+    # colnames(clust.results.df)[1] <- "experiment"
     write.table(clust.results.df,
                 file=paste(experiment.dir,
                            "/clustering_results.txt", sep=""),
-                row.names=TRUE, col.names=TRUE,
+                row.names=FALSE, col.names=TRUE,
                 sep="\t", quote=FALSE)
   }
 }
