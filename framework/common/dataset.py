@@ -2,7 +2,7 @@ from __future__ import (
     absolute_import, division, print_function, unicode_literals
 )
 
-from .util import shuffle_in_unison
+from .util import shuffle_in_unison, unpack_tuple
 from .util import to_one_hot as convert_to_one_hot
 import numpy as np
 

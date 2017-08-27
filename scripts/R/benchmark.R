@@ -89,7 +89,7 @@ summarizeModelSelectionExperiment <- function(experiment.dir,
     if (model.type == "vae") {
       model.info <- data.frame(model_name=model.config$name,
                                n_genes=model.config$input_size,
-                               n_layers=length(model.config$encoder_layers),
+                               n_layers=length(model.config$encoder_layers) / 2,
                                encoder_layers=paste(
                                  model.config$encoder_layers, collapse="|"),
                                n_latent_dim=model.config$latent_size,
@@ -98,7 +98,8 @@ summarizeModelSelectionExperiment <- function(experiment.dir,
     } else if (model.type == "ae") {
       model.info <- data.frame(model_name=model.config$name,
                                n_genes=model.config$input_size,
-                               n_layers=length(model.config$encoder_layers) - 1,
+                               n_layers=(length(
+                                 model.config$encoder_layers) - 1) / 2,
                                encoder_layers=paste(
                                  model.config$encoder_layers[
                                    1:(length(model.config$encoder_layers) - 1)],

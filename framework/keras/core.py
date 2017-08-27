@@ -22,7 +22,7 @@ class BaseModel(object):
     Base class for Keras-based model implementations
     """
 
-    def __init__(self, config, restore=False):
+    def __init__(self, config, restore=False, setup_default_callbacks=True):
         """
         Model constructor
 
@@ -40,7 +40,8 @@ class BaseModel(object):
             if "model_dir" in self.config else None
 
         self.callbacks = []
-        self._setup_default_callbacks()
+        if setup_default_callbacks:
+            self._setup_default_callbacks()
 
         # Run any extra setup steps
         self.setup()
