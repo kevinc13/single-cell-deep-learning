@@ -15,6 +15,7 @@ source("evaluation.R")
 experiment.dir <- "usokin/experiment_1c"
 model.name <- "UsokinVAE_BestTotalLoss"
 model.type <- "vae"
+output.file <- "clustering_results_best_total_loss.txt"
 
 latent.reps.col.start <- 2
 latent.reps.col.end <- -2
@@ -25,10 +26,9 @@ clust.dist <- "euclidean"
 max.k <- 11
 force.k <- 4
 
-
 plotVAELosses <- function(model.dir) {
   setwd(model.dir)
-
+  
   # Load training log
   train.log <- fread("training.log", header=TRUE, data.table=FALSE)
   
@@ -40,7 +40,7 @@ plotVAELosses <- function(model.dir) {
     plot.data <- stack(plot.data)
     plot.data <- cbind(rep(train.log$epoch, 2), plot.data)
     colnames(plot.data) <- c("epoch", "loss", "type")
-
+    
     loss.v.epoch.plot <- ggplot(
       plot.data, aes(x=epoch, y=loss, fill=type)) +
       geom_area(position="stack") +
@@ -57,9 +57,10 @@ summarizeModelSelectionExperiment <- function(experiment.dir,
                                               latent.reps.col.end, labels.col,
                                               max.k, force.k,
                                               clust.alg="km",
-                                              clust.dist="euclidean") {
+                                              clust.dist="euclidean",
+                                              output.file="clustering_results.txt") {
   experiment.dir <- paste(base.dir, "/results/", experiment.dir, sep="")
-
+  
   clust.results.df <- data.frame()
   for (exp.name in list.dirs(experiment.dir,
                              recursive=FALSE, full.names=FALSE)) {
@@ -117,14 +118,9 @@ summarizeModelSelectionExperiment <- function(experiment.dir,
     clust.results.df <- rbind(clust.results.df, row)
   }
   
-  if (!file.exists(paste(experiment.dir, 
-                         "/clustering_results.txt", sep=""))) {
-    # clust.results.df <- cbind(rownames(clust.results.df),
-    #                           clust.results.df)
-    # colnames(clust.results.df)[1] <- "experiment"
+  if (!file.exists(paste(experiment.dir, "/", output.file, sep=""))) {
     write.table(clust.results.df,
-                file=paste(experiment.dir,
-                           "/clustering_results.txt", sep=""),
+                file=paste(experiment.dir, "/", output.file, sep=""),
                 row.names=FALSE, col.names=TRUE,
                 sep="\t", quote=FALSE)
   }
@@ -136,4 +132,5 @@ summarizeModelSelectionExperiment(experiment.dir,
                                   latent.reps.col.start,
                                   latent.reps.col.end, labels.col,
                                   max.k, force.k,
-                                  clust.alg=clust.alg, clust.dist=clust.dist)
+                                  clust.alg=clust.alg, clust.dist=clust.dist,
+                                  output.file=output.file)
