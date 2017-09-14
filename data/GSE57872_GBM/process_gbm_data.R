@@ -5,46 +5,48 @@ library(scater)
 setwd("~/Documents/Research/XinghuaLuLab/single-cell-deep-learning/data/GSE57872_GBM")
 
 #### GSE57872: Glioblastoma dataset ####
-gbm_cells.TPM <- fread("original/GSE57872_GBM_all_cells_TPM.txt",
-                       header=TRUE,
-                       data.table=FALSE)
-rownames(gbm_cells.TPM) <- gbm_cells.TPM[,1]
-gbm_cells.TPM[,1] <- NULL
-
-sample_ids <- colnames(gbm_cells.TPM)
-cell_origin <- c(rep("primary_GBM", 430),
-                 rep("GBM_cell_line", 102),
-                 rep("tumor_cell_line", 2),
-                 "population_control",
-                 rep("tumor_cell_line", 2),
-                 rep("population_control", 3),
-                 rep("tumor_cell_line", 2),
-                 "population_control")
-pdata <- as.data.frame(cell_origin)
-rownames(pdata) <- sample_ids
-pdata <- AnnotatedDataFrame(pdata)
-
-edata <- as.matrix(gbm_cells.TPM)
-
-gbm.sceset <- newSCESet(exprsData=edata,
-                        phenoData=pdata)
-gbm.sceset <- calculateQCMetrics(gbm.sceset)
-
-remove(sample_ids)
-remove(cell_origin)
-remove(pdata)
-remove(edata)
-remove(gbm_cells.TPM)
-
-saveRDS(gbm.sceset, "original/gbm.rds")
+if (!file.exists("original/gbm.rds")) {
+  gbm_cells.TPM <- fread("original/GSE57872_GBM_all_cells_TPM.txt",
+                         header=TRUE,
+                         data.table=FALSE)
+  rownames(gbm_cells.TPM) <- gbm_cells.TPM[,1]
+  gbm_cells.TPM[,1] <- NULL
+  
+  sample_ids <- colnames(gbm_cells.TPM)
+  cell_origin <- c(rep("primary_GBM", 430),
+                   rep("GBM_cell_line", 102),
+                   rep("tumor_cell_line", 2),
+                   "population_control",
+                   rep("tumor_cell_line", 2),
+                   rep("population_control", 3),
+                   rep("tumor_cell_line", 2),
+                   "population_control")
+  pdata <- as.data.frame(cell_origin)
+  rownames(pdata) <- sample_ids
+  pdata <- AnnotatedDataFrame(pdata)
+  
+  edata <- as.matrix(gbm_cells.TPM)
+  
+  gbm.sceset <- newSCESet(exprsData=edata,
+                          phenoData=pdata)
+  gbm.sceset <- calculateQCMetrics(gbm.sceset)
+  
+  remove(sample_ids)
+  remove(cell_origin)
+  remove(pdata)
+  remove(edata)
+  remove(gbm_cells.TPM)
+  
+  saveRDS(gbm.sceset, "original/gbm.rds")
+}
 #### Data Processing ####
 gbm <- readRDS("original/gbm.rds")
 
 gbm <- gbm[,gbm$cell_origin == "primary_GBM"]
 
 ### ---------- Parameters ---------- ###
-n_genes <- 500
-standardize <- TRUE
+n_genes <- 200
+standardize <- FALSE
 scale <- FALSE
 
 ### ---------- Select Most Variable Genes ---------- ###
@@ -83,21 +85,34 @@ df <- as.data.frame(t(exprs(gbm.processed)))
 df <- cbind(rownames(df), df)
 colnames(df)[1] <- "cell_id"
 
-norm_technique <- ""
+norm_technique <- NA
 if (scale) {
     norm_technique <- "scaled"
 } else if (standardize) {
     norm_technique <- "standardized"
 }
 
-write.table(df,
-            file=paste(
+if (!is.na(norm_technique)) {
+  write.table(df,
+              file=paste(
                 "processed/gbm.", n_genes,
                 "g.", norm_technique, ".txt", sep=""),
-            quote=FALSE, row.names=FALSE,
-            col.names=TRUE,
-            sep="\t")
+              quote=FALSE, row.names=FALSE,
+              col.names=TRUE,
+              sep="\t")
+  
+  saveRDS(gbm.processed,
+          paste("processed/gbm.", n_genes,
+                "g.", norm_technique, ".SCESet.rds", sep="")) 
+} else {
+  write.table(df,
+              file=paste(
+                "processed/gbm.", n_genes, "g.txt", sep=""),
+              quote=FALSE, row.names=FALSE,
+              col.names=TRUE,
+              sep="\t")
+  
+  saveRDS(gbm.processed,
+          paste("processed/gbm.", n_genes, "g.SCESet.rds", sep=""))
+}
 
-saveRDS(gbm.processed,
-        paste("processed/gbm.", n_genes,
-              "g.", norm_technique, ".SCESet.rds", sep=""))

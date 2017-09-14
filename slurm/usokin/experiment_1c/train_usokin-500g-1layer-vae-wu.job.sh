@@ -11,10 +11,10 @@ pylon5="/pylon5/mc4s8ap/kchen8"
 project_name="single-cell-deep-learning"
 
 # Move to working directory
-cd ${pylon5}/${project_name}
+cd $pylon5/$project_name
 
 # Load Keras
 module load tensorflow/1.0.1_anaconda
 source activate $TENSORFLOW_ENV
 
-python main.py --e "pbmc.experiment_2a.train_pbmc-100g-2layer-vae" -s 1013
+python main.py "usokin.experiment_1c.train_usokin-500g-2layer-vae-wu" -s 1013

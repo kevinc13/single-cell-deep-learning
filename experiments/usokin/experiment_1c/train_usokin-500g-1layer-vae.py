@@ -10,6 +10,7 @@ from hyperopt import hp
 from framework.common.experiment import HyperoptExperiment, \
     CrossValidationExperiment
 from framework.common.sampling import stratified_kfold
+from framework.common.util import save_data_table, read_data_table
 from framework.keras.autoencoder import VariationalAutoencoder as VAE
 
 
@@ -39,8 +40,10 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
                                     epochs=200)
 
     def load_data(self):
-        df = np.array(self.read_data_table(
-            "data/Usokin/processed/usokin.500g.standardized.txt"))
+        df = np.array(read_data_table(
+            self.root_dir +
+            "/data/Usokin/processed" +
+            "/usokin.500g.standardized.txt"))
         features = df[1:, 1:-2]
 
         cell_ids = df[1:, 0]
@@ -149,7 +152,7 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
         results = np.vstack((header, results))
 
         self.logger.info("Saving results")
-        self.save_data_table(
+        save_data_table(
             results,
             model_config["model_dir"] + "/latent_representations.txt")
 
@@ -189,7 +192,7 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
                 result["avg_valid_metrics"]["kl_divergence_loss"],
                 result["avg_valid_metrics"]["loss"]
             ])
-        self.save_data_table(
+        save_data_table(
             experiment_results,
             self.experiment_dir + "/experiment_results.txt")
         self.logger.info("Saved experiment results")

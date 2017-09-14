@@ -6,54 +6,56 @@ setwd(paste("~/Documents/Research/XinghuaLuLab/single-cell-deep-learning/",
             "data/GSE72056_Melanoma", sep=""))
 
 #### Create SCESet ####
-melanoma.TPM <- fread("original/melanoma_cells_TPM.txt",
-                            header=TRUE,
-                            data.table=FALSE)
-rownames(melanoma.TPM) <- make.unique(melanoma.TPM[,1])
-melanoma.TPM[,1] <- NULL
-
-# Malignant (0=unresolved, 1=no, 2=yes)
-# Non-malignant cell type (1=T, 2=B, 3=Macro, 4=Endothelial, 5=CAF, 6=NK)
-pdata <- data.frame(t(melanoma.TPM[1:3,]))
-colnames(pdata) <- c("tumor_id", "malignant", "non_malignant_cell_type")
-pdata <- AnnotatedDataFrame(pdata)
-
-edata <- as.matrix(melanoma.TPM[4:nrow(melanoma.TPM),])
-# Un-log transform original data
-edata <- 2^edata - 1
-
-melanoma.TPM.sceset <- newSCESet(tpmData=edata,
-                                 phenoData=pdata,
-                                 logExprsOffset = 1)
-melanoma.TPM.sceset <- calculateQCMetrics(melanoma.TPM.sceset)
-
-remove(pdata)
-remove(edata)
-remove(melanoma.TPM)
-
-melanoma.TPM.sceset$malignant <- factor(melanoma.TPM.sceset$malignant)
-levels(melanoma.TPM.sceset$malignant) <- c("unresolved", "no", "yes")
-melanoma.TPM.sceset$malignant <- as.character(melanoma.TPM.sceset$malignant)
-
-melanoma.TPM.sceset$non_malignant_cell_type <- factor(
+if (!file.exists("original/melanoma.TPM.rds")) {
+  melanoma.TPM <- fread("original/melanoma_cells_TPM.txt",
+                        header=TRUE,
+                        data.table=FALSE)
+  rownames(melanoma.TPM) <- make.unique(melanoma.TPM[,1])
+  melanoma.TPM[,1] <- NULL
+  
+  # Malignant (0=unresolved, 1=no, 2=yes)
+  # Non-malignant cell type (1=T, 2=B, 3=Macro, 4=Endothelial, 5=CAF, 6=NK)
+  pdata <- data.frame(t(melanoma.TPM[1:3,]))
+  colnames(pdata) <- c("tumor_id", "malignant", "non_malignant_cell_type")
+  pdata <- AnnotatedDataFrame(pdata)
+  
+  edata <- as.matrix(melanoma.TPM[4:nrow(melanoma.TPM),])
+  # Un-log transform original data
+  edata <- 2^edata - 1
+  
+  melanoma.TPM.sceset <- newSCESet(tpmData=edata,
+                                   phenoData=pdata,
+                                   logExprsOffset = 1)
+  melanoma.TPM.sceset <- calculateQCMetrics(melanoma.TPM.sceset)
+  
+  remove(pdata)
+  remove(edata)
+  remove(melanoma.TPM)
+  
+  melanoma.TPM.sceset$malignant <- factor(melanoma.TPM.sceset$malignant)
+  levels(melanoma.TPM.sceset$malignant) <- c("unresolved", "no", "yes")
+  melanoma.TPM.sceset$malignant <- as.character(melanoma.TPM.sceset$malignant)
+  
+  melanoma.TPM.sceset$non_malignant_cell_type <- factor(
     melanoma.TPM.sceset$non_malignant_cell_type)
-levels(melanoma.TPM.sceset$non_malignant_cell_type) <- c("unresolved", "T", "B", 
-                                                               "Macro", "Endothelial",
-                                                               "CAF", "NK")
-melanoma.TPM.sceset$non_malignant_cell_type <- as.character(
+  levels(melanoma.TPM.sceset$non_malignant_cell_type) <- c("unresolved", "T", "B", 
+                                                           "Macro", "Endothelial",
+                                                           "CAF", "NK")
+  melanoma.TPM.sceset$non_malignant_cell_type <- as.character(
     melanoma.TPM.sceset$non_malignant_cell_type)
-
-melanoma.TPM.sceset$cell_type[
+  
+  melanoma.TPM.sceset$cell_type[
     melanoma.TPM.sceset$malignant == "yes"] <- "malignant"
-melanoma.TPM.sceset$cell_type[
+  melanoma.TPM.sceset$cell_type[
     melanoma.TPM.sceset$non_malignant_cell_type != "unresolved"] <- 
     as.character(
-        melanoma.TPM.sceset$non_malignant_cell_type[
-            melanoma.TPM.sceset$non_malignant_cell_type != "unresolved"])
-melanoma.TPM.sceset$cell_type[is.na(melanoma.TPM.sceset$cell_type)] <- "unresolved"
-
-saveRDS(melanoma.TPM.sceset, "original/melanoma.TPM.rds")
-remove(melanoma.TPM.sceset)
+      melanoma.TPM.sceset$non_malignant_cell_type[
+        melanoma.TPM.sceset$non_malignant_cell_type != "unresolved"])
+  melanoma.TPM.sceset$cell_type[is.na(melanoma.TPM.sceset$cell_type)] <- "unresolved"
+  
+  saveRDS(melanoma.TPM.sceset, "original/melanoma.TPM.rds")
+  remove(melanoma.TPM.sceset)
+}
 
 #### Data Processing ####
 melanoma <- readRDS("original/melanoma.TPM.rds")
@@ -61,8 +63,8 @@ melanoma <- readRDS("original/melanoma.TPM.rds")
 melanoma <- melanoma[,melanoma$cell_type != "unresolved"]
 
 ### ---------- Parameters ---------- ###
-n_genes <- 500
-standardize <- TRUE
+n_genes <- 200
+standardize <- FALSE
 scale <- FALSE
 
 ### ---------- Gene Filtering ---------- ###
@@ -125,21 +127,35 @@ df$cell_type <- melanoma.processed$cell_type
 df <- cbind(rownames(df), df)
 colnames(df)[1] <- "cell_id"
 
-norm_technique <- ""
+norm_technique <- NA
 if (scale) {
     norm_technique <- "scaled"
 } else if (standardize) {
     norm_technique <- "standardized"
 }
 
-write.table(df,
-            file=paste(
+if (!is.na(norm_technique)) {
+  write.table(df,
+              file=paste(
                 "processed/melanoma.", n_genes,
                 "g.", norm_technique, ".txt", sep=""),
-            quote=FALSE, row.names=FALSE,
-            col.names=TRUE,
-            sep="\t")
+              quote=FALSE, row.names=FALSE,
+              col.names=TRUE,
+              sep="\t")
+  
+  saveRDS(melanoma.processed,
+          paste("processed/melanoma.", n_genes,
+                "g.", norm_technique, ".SCESet.rds", sep="")) 
+} else {
+  write.table(df,
+              file=paste(
+                "processed/melanoma.", n_genes, "g.txt", sep=""),
+              quote=FALSE, row.names=FALSE,
+              col.names=TRUE,
+              sep="\t")
+  
+  saveRDS(melanoma.processed,
+          paste("processed/melanoma.", n_genes, "g.SCESet.rds", sep=""))
+}
 
-saveRDS(melanoma.processed,
-        paste("processed/melanoma.", n_genes,
-              "g.", norm_technique, ".SCESet.rds", sep=""))
+

@@ -152,7 +152,7 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
         results = np.vstack((header, results))
 
         self.logger.info("Saving results")
-        self.save_data_table(
+        save_data_table(
             results,
             model_config["model_dir"] + "/latent_representations.txt")
 
@@ -179,7 +179,7 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
                 result["model_config"]["batch_size"],
                 result["avg_valid_metrics"]["loss"]
             ])
-        self.save_data_table(
+        save_data_table(
             experiment_results,
             self.experiment_dir + "/experiment_results.txt")
         self.logger.info("Saved experiment results")

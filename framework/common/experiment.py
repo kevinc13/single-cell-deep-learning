@@ -6,7 +6,6 @@ import csv
 import logging
 import os
 import sys
-from time import gmtime, strftime
 
 import six
 import numpy as np
@@ -14,10 +13,10 @@ from collections import Iterable
 from hyperopt import fmin, tpe, Trials, space_eval, STATUS_OK, STATUS_FAIL
 
 from framework.common.dataset import Dataset
+from framework.common.util import create_dir
 
 
 class BaseExperiment(object):
-
     def __init__(self, debug=False):
         self.debug = debug
 
@@ -33,14 +32,17 @@ class BaseExperiment(object):
 
     def setup_dir(self):
         if not hasattr(self, "experiment_name") or \
-                self.experiment_name is None:
-            raise Exception("The experiment must specify an experiment name")
+                        self.experiment_name is None:
+            self.experiment_name = self.__class__.__name__
+
+        if self.debug:
+            self.experiment_name = "DEBUG_" + self.experiment_name
 
         self.results_dir = "{}/results".format(self.root_dir)
         self.experiment_dir = "{}/{}".format(
             self.results_dir, self.experiment_name)
 
-        self.create_dir(self.experiment_dir)
+        create_dir(self.experiment_dir)
 
     def setup_logger(self):
         # Setup logger
@@ -64,35 +66,8 @@ class BaseExperiment(object):
     def run(self):
         raise Exception("The experiment must implement the run method")
 
-    def create_dir(self, dir):
-        if not os.path.exists(dir):
-            os.makedirs(dir)
-
     def get_model_dir(self, model_name):
         return "{}/{}".format(self.experiment_dir, model_name)
-
-    def read_data_table(self, filepath, delimiter="\t"):
-        with open("{}/{}".format(self.root_dir, filepath), "r") as f:
-            data = []
-            for line in f.readlines():
-                data.append(line.replace("\n", "").split(delimiter))
-
-            return data
-
-    def save_data_table(self, data, filepath, root=None, delimiter="\t"):
-        if root is not None:
-            filepath = root + "/" + filepath
-
-        delimiter = str(delimiter) if six.PY2 else delimiter
-
-        with open(filepath, "w") as f:
-            writer = csv.writer(
-                f, delimiter=delimiter, quoting=csv.QUOTE_MINIMAL)
-            for r in data:
-                writer.writerow(r)
-
-    def current_time(self):
-        return strftime("%m-%d-%y_%H:%M:%S", gmtime())
 
 
 class HyperoptExperiment(BaseExperiment):
@@ -143,7 +118,7 @@ class CrossValidationExperiment(BaseExperiment):
     def train_case_model(self, case_config,
                          batch_size=None, loss_metric="loss"):
         model_config = self.get_model_config(case_config)
-        self.create_dir(model_config["model_dir"])
+        create_dir(model_config["model_dir"])
 
         if self.logger is not None:
             self.logger.info("Training %s..." % model_config["name"])
@@ -177,7 +152,7 @@ class CrossValidationExperiment(BaseExperiment):
             if not isinstance(eval_metrics, Iterable):
                 eval_metrics = [eval_metrics]
 
-            fold_valid_metrics = dict(zip(model.keras_model.metrics_names,
+            fold_valid_metrics = dict(zip(model.autoencoder_model.metrics_names,
                                           eval_metrics))
 
             if np.any(np.isnan(list(fold_valid_metrics.values()))) or \
@@ -219,7 +194,7 @@ class CrossValidationExperiment(BaseExperiment):
 
     def train_final_model(self, model_config, batch_size=None):
         model_dir = self.get_model_dir(model_config["name"])
-        self.create_dir(model_dir)
+        create_dir(model_dir)
         model_config["model_dir"] = model_dir
 
         if batch_size is None:
@@ -244,7 +219,7 @@ class CrossValidationExperiment(BaseExperiment):
         if not isinstance(eval_metrics, Iterable):
             eval_metrics = [eval_metrics]
 
-        metrics = dict(zip(model.keras_model.metrics_names,
+        metrics = dict(zip(model.autoencoder_model.metrics_names,
                            eval_metrics))
 
         if self.logger is not None:

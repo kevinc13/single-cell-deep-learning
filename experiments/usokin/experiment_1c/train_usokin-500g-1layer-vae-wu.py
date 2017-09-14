@@ -17,7 +17,7 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
     def __init__(self, debug=False):
         super(Experiment, self).__init__(debug)
 
-        self.experiment_name = "train_pbmc-500g-1layer-vae"
+        self.experiment_name = "train_usokin-500g-1layer-vae-wu"
         if self.debug:
             self.experiment_name = "DEBUG_" + self.experiment_name
 
@@ -26,34 +26,36 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
         self.setup_hyperopt(n_evals=50)
 
         self.input_size = 500
-        cell_ids, features, cell_types = self.load_data()
+        cell_ids, features, cell_types, cell_subtypes = self.load_data()
         self.datasets = stratified_kfold(
-            features, cell_types,
-            [cell_ids, cell_types],
+            features, cell_subtypes,
+            [cell_ids, cell_types, cell_subtypes],
             n_folds=5, convert_labels_to_int=True)
-        self.logger.info("Loaded 500g, standardized GSE94820 PBMC dataset")
+        self.logger.info("Loaded 500g, standardized Usokin dataset")
 
         self.setup_cross_validation(n_folds=5,
                                     datasets=self.datasets,
-                                    model_class=VAE)
+                                    model_class=VAE,
+                                    epochs=500)
 
     def load_data(self):
         df = np.array(self.read_data_table(
-            "data/GSE94820_PBMC/processed/pbmc.500g.standardized.txt"))
-        features = df[1:, 1:-1]
+            "data/Usokin/processed/usokin.500g.standardized.txt"))
+        features = df[1:, 1:-2]
 
         cell_ids = df[1:, 0]
-        cell_types = df[1:, -1]
+        cell_types = df[1:, -2]
+        cell_subtypes = df[1:, -1]
 
-        return cell_ids, features, cell_types
+        return cell_ids, features, cell_types, cell_subtypes
 
     def hyperopt_search_space(self):
         return {
             "encoder_layer_sizes": [
-                hp.choice("layer1", list(range(200, 550, step=50)))
+                hp.choice("layer1", list(range(200, 550, 50)))
             ],
             "latent_size": hp.choice(
-                "latent_size", [10, 15, 20, 25, 50, 100, 150, 200]),
+                "latent_size", [10, 15, 20, 25, 50, 100, 200]),
             "activation": hp.choice(
                 "activation", ["elu", "relu", "sigmoid", "tanh"]),
             "batch_size": hp.choice(
@@ -63,7 +65,7 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
                     {
                         "name": "adam",
                         "lr": hp.loguniform(
-                            "adam_lr", -6 * log(10), -1 * log(10))
+                            "adam_lr", -6 * log(10), -2 * log(10))
                     },
                     {
                         "name": "sgd",
@@ -72,7 +74,9 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
                         "momentum": hp.choice(
                             "sgd_momentum", [0.5, 0.9, 0.95, 0.99])
                     }
-                ])
+                ]),
+            "n_warmup_epochs": hp.choice(
+                "n_warmup_epochs", [10, 20, 30, 40, 50, 75, 100])
         }
 
     def get_model_config(self, case_config):
@@ -86,7 +90,7 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
             "early_stopping_patience": 5
         }
 
-        model_name = "{}_PBMCVAE".format(self.case_counter)
+        model_name = "{}_UsokinVAE".format(self.case_counter)
         model_dir = self.get_model_dir(model_name)
         encoder_layers = [
             "Dense:{}:activation='{}'".format(
@@ -111,7 +115,8 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
             "encoder_layers": encoder_layers,
             "latent_size": case_config["latent_size"],
             "optimizer": optimizer,
-            "batch_size": case_config["batch_size"]
+            "batch_size": case_config["batch_size"],
+            "n_warmup_epochs": case_config["n_warmup_epochs"]
         })
 
         return model_config
@@ -120,6 +125,8 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
         model_config["bernoulli"] = False
         model_config["tensorboard"] = True
         model_config["checkpoint"] = True
+        model_config["early_stopping_metric"] = "loss"
+        model_config["checkpoint_metric"] = "loss"
 
         results = self.train_final_model(model_config)
         final_vae = results["model"]
@@ -131,19 +138,21 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
         results = np.hstack((
             np.expand_dims(full_dataset.sample_data[0], axis=1),
             latent_reps,
-            np.expand_dims(full_dataset.sample_data[1], axis=1)
+            np.expand_dims(full_dataset.sample_data[1], axis=1),
+            np.expand_dims(full_dataset.sample_data[2], axis=1)
         ))
 
         header = ["cell_ids"]
         for l in range(1, model_config["latent_size"] + 1):
             header.append("dim{}".format(l))
         header.append("cell_type")
+        header.append("cell_subtype")
         header = np.array(header)
 
         results = np.vstack((header, results))
 
         self.logger.info("Saving results")
-        self.save_data_table(
+        save_data_table(
             results,
             model_config["model_dir"] + "/latent_representations.txt")
 
@@ -167,11 +176,12 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
             "cv_total_loss"
         ]]
         for result in trials.results:
-            losses.append((
-                result["model_config"],
-                result["avg_valid_metrics"]["reconstruction_loss"],
-                result["avg_valid_metrics"]["kl_divergence_loss"],
-                result["avg_valid_metrics"]["loss"]))
+            if None not in result["avg_valid_metrics"].values():
+                losses.append((
+                    result["model_config"],
+                    result["avg_valid_metrics"]["reconstruction_loss"],
+                    result["avg_valid_metrics"]["kl_divergence_loss"],
+                    result["avg_valid_metrics"]["loss"]))
             experiment_results.append([
                 result["model_config"]["name"],
                 result["model_config"]["encoder_layers"],
@@ -182,23 +192,19 @@ class Experiment(CrossValidationExperiment, HyperoptExperiment):
                 result["avg_valid_metrics"]["kl_divergence_loss"],
                 result["avg_valid_metrics"]["loss"]
             ])
-        self.save_data_table(
+        save_data_table(
             experiment_results,
             self.experiment_dir + "/experiment_results.txt")
         self.logger.info("Saved experiment results")
 
         # Train the final VAE using the best model configs
         best_loss_model_config = self.get_model_config(best_loss_case_config)
-        best_loss_model_config["name"] = "PBMCVAE_BestTotalLoss"
+        best_loss_model_config["name"] = "UsokinVAE_BestTotalLoss"
 
         best_recon_loss_model_config = sorted(losses, key=lambda x: x[1])[0][0]
-        best_recon_loss_model_config["name"] = "PBMCVAE_BestReconLoss"
-
-        best_kl_loss_model_config = sorted(losses, key=lambda x: x[2])[0][0]
-        best_kl_loss_model_config["name"] = "PBMCVAE_BestKLDivergenceLoss"
+        best_recon_loss_model_config["name"] = "UsokinVAE_BestReconLoss"
 
         self.train_final_vae(best_loss_model_config)
         self.train_final_vae(best_recon_loss_model_config)
-        self.train_final_vae(best_kl_loss_model_config)
 
         self.logger.info("EXPERIMENT END")

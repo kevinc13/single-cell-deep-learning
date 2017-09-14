@@ -21,9 +21,14 @@ def sqrt_uniform_sample(a, b):
 
 def stratified_sample(features,
                       labels,
-                      sample_data=[],
-                      proportions=[],
+                      sample_data=None,
+                      proportions=None,
                       convert_labels_to_int=False):
+    if sample_data is None:
+        sample_data = []
+    if proportions is None:
+        proportions = []
+
     # Randomize dataset
     features, labels, sample_data = \
         unpack_tuple(shuffle_in_unison(features, labels, *sample_data), 2)

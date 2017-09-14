@@ -106,7 +106,7 @@ class Experiment(BaseExperiment):
 
     def train_vae(self, case_config):
         model_config = self.get_model_config(case_config)
-        self.create_dir(model_config["model_dir"])
+        create_dir(model_config["model_dir"])
 
         avg_valid_loss = 0.0
         for k in range(0, 10):
@@ -150,7 +150,7 @@ class Experiment(BaseExperiment):
     def train_final_vae(self, model_config):
         model_config["name"] = model_config["name"] + "_FULL"
         model_dir = self.get_model_dir(model_config["name"])
-        self.create_dir(model_dir)
+        create_dir(model_dir)
         model_config["model_dir"] = model_dir
 
         n_epochs = 2 if self.debug else 100
@@ -184,7 +184,7 @@ class Experiment(BaseExperiment):
         results = np.vstack((header, results))
 
         self.logger.info("Saving results")
-        self.save_data_table(
+        save_data_table(
             results,
             model_config["model_dir"] + "/latent_representations.txt")        
 
@@ -216,6 +216,6 @@ class Experiment(BaseExperiment):
                 result["name"],
                 result["loss"]
             ])
-        self.save_data_table(
+        save_data_table(
             experiment_results,
             self.experiment_dir + "/experiment_results.txt")

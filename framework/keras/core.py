@@ -5,6 +5,7 @@ from __future__ import (
 import copy
 import json
 
+import os
 import tensorflow as tf
 from keras import backend as K
 from keras.callbacks import (
@@ -22,7 +23,7 @@ class BaseModel(object):
     Base class for Keras-based model implementations
     """
 
-    def __init__(self, config, restore=False, setup_default_callbacks=True):
+    def __init__(self, config, restore=False):
         """
         Model constructor
 
@@ -39,9 +40,7 @@ class BaseModel(object):
         self.model_dir = self.config["model_dir"] \
             if "model_dir" in self.config else None
 
-        self.callbacks = []
-        if setup_default_callbacks:
-            self._setup_default_callbacks()
+        self.saveable_models = {}
 
         # Run any extra setup steps
         self.setup()
@@ -58,40 +57,63 @@ class BaseModel(object):
     def setup(self):
         pass
 
-    def _setup_default_callbacks(self):
-        if "tensorboard" in self.config and self.config["tensorboard"]:
-            self.callbacks.append(TensorBoard(
-                log_dir=self.model_dir + "/tensorboard",
-                histogram_freq=1,
-                write_graph=True,
-                write_grads=True))
+    def setup_callbacks(self, callback_config):
+        callbacks = []
 
         if self.model_dir is not None:
-            if "checkpoint" in self.config and self.config["checkpoint"]:
-                checkpoint_metric = "val_loss" \
-                    if "checkpoint_metric" not in self.config else \
-                    self.config["checkpoint_metric"]
+            if "tensorboard" in callback_config and \
+                    callback_config["tensorboard"]:
+                callbacks.append(TensorBoard(
+                    log_dir=self.model_dir + "/tensorboard",
+                    histogram_freq=1,
+                    write_graph=True,
+                    write_grads=True))
 
-                self.callbacks.append(ModelCheckpoint(
-                    self.model_dir + "/keras_model.weights.h5",
+            if "checkpoint" in callback_config and \
+                    callback_config["checkpoint"]:
+
+                if isinstance(callback_config["checkpoint"], dict):
+                    checkpoint_metric = callback_config["checkpoint"]["metric"]
+                    checkpoint_file = callback_config["checkpoint"]["file"]
+                else:
+                    checkpoint_metric = "val_loss"
+                    checkpoint_file = "keras_model.weights.h5"
+
+                callbacks.append(ModelCheckpoint(
+                    "{}/{}".format(self.model_dir, checkpoint_file),
                     monitor=checkpoint_metric, verbose=0,
                     save_best_only=True, save_weights_only=True))
-            self.callbacks.append(TimeLogger())
-            self.callbacks.append(FileLogger(
-                self.model_dir + "/training.log", append=True))
 
-        if "early_stopping_metric" in self.config \
-                and "early_stopping_min_delta" in self.config \
-                and "early_stopping_patience" in self.config:
-            self.callbacks.append(EarlyStopping(
-                monitor=self.config["early_stopping_metric"],
-                min_delta=self.config["early_stopping_min_delta"],
-                patience=self.config["early_stopping_patience"]))
+            callbacks.append(TimeLogger())
 
-        self.callbacks.append(TerminateOnNaN())
+            if "file_logger" in callback_config and \
+                    callback_config["file_logger"]:
+
+                if isinstance(callback_config["file_logger"], dict):
+                    log_file = callback_config["file_logger"]["file"]
+                else:
+                    log_file = "training.log"
+
+                callbacks.append(FileLogger("{}/{}".format(
+                    self.model_dir, log_file), append=True))
+
+        if "early_stopping" in callback_config and \
+                isinstance(callback_config["early_stopping"], dict):
+            callbacks.append(EarlyStopping(
+                monitor=callback_config["early_stopping"]["metric"],
+                min_delta=callback_config["early_stopping"]["min_delta"],
+                patience=callback_config["early_stopping"]["patience"]))
+
+        callbacks.append(TerminateOnNaN())
+
+        return callbacks
 
     def build(self):
         raise Exception("The model must implement the build method")
+
+    def add_saveable_model(self, name, model):
+        if self.model_dir is not None:
+            self.saveable_models[name] = model
 
     def save_config(self):
         """
@@ -109,9 +131,10 @@ class BaseModel(object):
             return json.load(f)
 
     def load_weights(self):
-        if hasattr(self, "keras_model"):
-            self.keras_model.load_weights(
-                self.model_dir + "/keras_model.weights.h5")
+        for name, _ in self.saveable_models.items():
+            weights_file = "{}/{}.weights.h5".format(self.model_dir, name)
+            if hasattr(self, name) and os.path.isfile(weights_file):
+                getattr(self, name).load_weights(weights_file)
 
     @classmethod
     def restore(cls, model_dir):
@@ -119,6 +142,7 @@ class BaseModel(object):
         Restore a previously saved version of the model
         """
         config = cls.load_config(model_dir)
+        config["model_dir"] = model_dir
         return cls(config, restore=True)
 
     @staticmethod

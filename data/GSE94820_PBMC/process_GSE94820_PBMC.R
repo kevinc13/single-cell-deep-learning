@@ -65,8 +65,8 @@ if (!file.exists("original/pbmc.rds")) {
 pbmc <- readRDS("original/pbmc.rds")
 
 ### ---------- Parameters ---------- ###
-n_genes <- 1000
-standardize <- TRUE
+n_genes <- 200
+standardize <- FALSE
 scale <- FALSE
 
 ### ---------- Gene Filtering ---------- ###
@@ -129,7 +129,7 @@ df$cell_type <- pbmc.processed$cell_type
 df <- cbind(rownames(df), df)
 colnames(df)[1] <- "cell_id"
 
-norm_technique <- ""
+norm_technique <- NA
 if (scale) {
     norm_technique <- "scaled"
 } else if (standardize) {
@@ -138,14 +138,29 @@ if (scale) {
 
 dir.create("processed", showWarnings = FALSE)
 
-write.table(df,
-            file=paste(
+if (!is.na(norm_technique)) {
+  write.table(df,
+              file=paste(
                 "processed/pbmc.", n_genes,
                 "g.", norm_technique, ".txt", sep=""),
-            quote=FALSE, row.names=FALSE,
-            col.names=TRUE,
-            sep="\t")
+              quote=FALSE, row.names=FALSE,
+              col.names=TRUE,
+              sep="\t")
+  
+  saveRDS(pbmc.processed,
+          paste("processed/pbmc.", n_genes,
+                "g.", norm_technique, ".SCESet.rds", sep=""))
+} else {
+  write.table(df,
+              file=paste(
+                "processed/pbmc.", n_genes, "g.txt", sep=""),
+              quote=FALSE, row.names=FALSE,
+              col.names=TRUE,
+              sep="\t")
+  
+  saveRDS(pbmc.processed,
+          paste("processed/pbmc.", n_genes, "g.SCESet.rds", sep=""))
+}
 
-saveRDS(pbmc.processed,
-        paste("processed/pbmc.", n_genes,
-              "g.", norm_technique, ".SCESet.rds", sep=""))
+
+

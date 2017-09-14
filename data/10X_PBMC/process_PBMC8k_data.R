@@ -6,7 +6,7 @@ setwd("~/Documents/Research/XinghuaLuLab/single-cell-deep-learning/data/10X_PBMC
 
 n_genes <- 100
 
-pbmc_data <- Read10X(data.dir = "original/PBMC8k_cell_matrix_filtered/GRCh38/")
+pbmc_data <- Read10X(data.dir = "original/8k")
 pbmc <- CreateSeuratObject(raw.data = pbmc_data, min.cells = 3, min.genes = 200, 
                            project = "10X_PBMC8k")
 

@@ -5,17 +5,20 @@ from __future__ import (
 import numpy as np
 
 from keras.datasets import mnist
+
+from framework.common.util import save_data_table, create_dir
 from framework.keras.autoencoder import VariationalAutoencoder as VAE
 from framework.common.dataset import Dataset
 from framework.common.experiment import BaseExperiment
 import matplotlib.pyplot as plt
 
 
-class Experiment(BaseExperiment):
+class TrainMNISTVAE(BaseExperiment):
     def __init__(self, debug=False):
-        super(Experiment, self).__init__(debug)
+        super(TrainMNISTVAE, self).__init__(debug)
 
-        self.experiment_name = "train_keras_mnist_vae"
+        self.setup_dir()
+        self.setup_logger()
 
     def run(self):
         (x_train, y_train), (x_test, y_test) = mnist.load_data()
@@ -30,16 +33,16 @@ class Experiment(BaseExperiment):
         model_name = "MNIST_VAE"
         model_dir = self.get_model_dir(model_name)
 
-        self.create_dir(model_dir)
+        create_dir(model_dir)
 
         model_config = {
             "name": model_name,
             "model_dir": model_dir,
 
             "input_size": 784,
-            "bernoulli": True,
             "encoder_layers": [
-                "Dense:256:activation='relu'"
+                "Dense:256:activation='elu'",
+                "BatchNormalization"
             ],
             "latent_size": 2,
 
@@ -47,7 +50,7 @@ class Experiment(BaseExperiment):
         }
 
         if self.debug:
-            epochs = 2
+            epochs = 3
         else:
             epochs = 50
 
@@ -71,11 +74,12 @@ class Experiment(BaseExperiment):
         results = np.vstack((header, results))
 
         self.logger.info("Saving results")
-        self.save_data_table(
+        save_data_table(
             results,
             model_config["model_dir"] + "/latent_representations.txt")
 
         plt.figure(figsize=(6, 6))
-        plt.scatter(latent_reps[:, 0], latent_reps[:, 1], c=y_test)
+        plt.scatter(latent_reps[:, 0], latent_reps[:, 1],
+                    c=y_test, cmap="rainbow")
         plt.colorbar()
         plt.show()

@@ -8,23 +8,29 @@ setwd(paste(base.dir, "/scripts/R", sep=""))
 
 library(data.table)
 library(rjson)
+library(scater)
 
 source("evaluation.R")
 
 # Configuration ----------------------------------------------------------------
-experiment.dir <- "usokin/experiment_1c"
-model.name <- "UsokinVAE_BestTotalLoss"
-model.type <- "vae"
-output.file <- "clustering_results_best_total_loss.txt"
+dataset.dir <- "GSE94820_PBMC/processed/pbmc.500g.SCESet.rds"
+pca.ntop <- 500
+pca.ncomponents <- 10
+results.dir <- "GSE94820_PBMC/pca_500g"
+
+experiment.dir <- "pbmc"
+model.name <- "PBMCAE_FINAL"
+model.type <- "ae"
+output.file <- "clustering_results_forcek7.txt"
 
 latent.reps.col.start <- 2
-latent.reps.col.end <- -2
+latent.reps.col.end <- -1
 labels.col <- "cell_type"
 
 clust.alg <- "km"
 clust.dist <- "euclidean"
-max.k <- 11
-force.k <- 4
+max.k <- 7
+force.k <- 7
 
 plotVAELosses <- function(model.dir) {
   setwd(model.dir)
@@ -42,8 +48,8 @@ plotVAELosses <- function(model.dir) {
     colnames(plot.data) <- c("epoch", "loss", "type")
     
     loss.v.epoch.plot <- ggplot(
-      plot.data, aes(x=epoch, y=loss, fill=type)) +
-      geom_area(position="stack") +
+      plot.data, aes(x=epoch, y=loss, color=type)) +
+      geom_line() +
       ggtitle("VAE Training Losses v. Epoch")
     ggsave("losses_v_epoch.png",
            plot=loss.v.epoch.plot, device="png", path = ".",
@@ -51,7 +57,7 @@ plotVAELosses <- function(model.dir) {
   }
 }
 
-summarizeModelSelectionExperiment <- function(experiment.dir,
+benchmarkModelSelectionExperiment <- function(experiment.dir,
                                               model.name, model.type,
                                               latent.reps.col.start,
                                               latent.reps.col.end, labels.col,
@@ -126,8 +132,45 @@ summarizeModelSelectionExperiment <- function(experiment.dir,
   }
 }
 
+benchmarkPCA <- function(dataset.file, labels.col, output.dir,
+                         max.k, force.k=NA, clust.alg="km", clust.dist="euclidean",
+                         ncomponents=10, ntop=500) {
+  if (!dir.exists(output.dir)) {
+    dir.create(output.dir, recursive=TRUE)
+  }
+  
+  dataset <- readRDS(dataset.file)
+  labels <- pData(dataset)[,labels.col]
+  
+  pca <- plotPCA(dataset, ncomponents=ncomponents,
+                 return_SCESet=TRUE, scale_features=TRUE,
+                 draw_plot=FALSE, ntop=ntop)
+  latent.reps <- reducedDimension(pca)
+  
+  evaluation <- evaluateLatentRepresentations(output.dir,
+                                              latent.reps, labels,
+                                              clust.alg, clust.dist,
+                                              max.k, force.k=force.k)
+  catln("Finished evaluating PCA")
+  
+  if (is.na(force.k)) {
+    output.file <- paste("clustering_results_maxk", max.k, ".txt", sep="")
+  } else {
+    output.file <- paste("clustering_results_maxk", max.k,
+                         "_forcek", force.k, ".txt", sep="")
+  }
+  
+  write.table(evaluation$clustering.results,
+              file=paste(output.dir, "/", output.file, sep=""),
+              sep="\t", quote=FALSE, row.names=FALSE, col.names=TRUE)
+}
 
-summarizeModelSelectionExperiment(experiment.dir,
+# benchmarkPCA(
+#   paste(base.dir, "/data/", dataset.dir, sep=""),
+#   labels.col, paste(base.dir, "/results/", results.dir, sep=""),
+#   max.k, force.k, ncomponents=pca.ncomponents, ntop=pca.ntop)
+
+benchmarkModelSelectionExperiment(experiment.dir,
                                   model.name, model.type,
                                   latent.reps.col.start,
                                   latent.reps.col.end, labels.col,

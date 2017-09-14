@@ -49,7 +49,7 @@ class Experiment(BaseExperiment):
         model_name = "UsokinDNN"
         model_dir = self.get_model_dir(model_name)
 
-        self.create_dir(model_dir)
+        create_dir(model_dir)
 
         model_config = {
             "name": model_name,

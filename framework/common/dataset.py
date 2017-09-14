@@ -91,8 +91,9 @@ class Dataset:
         """
         assert(batch_size < self._num_examples)
         start = self._index_in_epoch
+        self._index_in_epoch += batch_size
 
-        if start == self._num_examples:
+        if self._index_in_epoch > self._num_examples:
             # Finished 1 epoch
             self._epoch_count += 1
 
@@ -101,16 +102,10 @@ class Dataset:
 
             # Start next epoch
             start = 0
-            self._index_in_epoch = 0
-
-        self._index_in_epoch += batch_size
-
-        if self._index_in_epoch > self._num_examples:
-            self._index_in_epoch = self._num_examples
+            self._index_in_epoch = batch_size
 
         end = self._index_in_epoch
-
-        return (self._features[start:end], self._labels[start:end])
+        return self._features[start:end], self._labels[start:end]
 
     @staticmethod
     def concatenate(*datasets, **kwargs):
