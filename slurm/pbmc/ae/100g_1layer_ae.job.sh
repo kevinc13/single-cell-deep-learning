@@ -17,4 +17,4 @@ cd ${pylon5}/${project_name}
 module load tensorflow/1.0.1_anaconda
 source activate $TENSORFLOW_ENV
 
-python main.py --e "pbmc.ae.Train100g1LayerPBMCAE" -s 1013
+python main.py "pbmc.ae.Train100g1LayerPBMCAE" -s 1013
