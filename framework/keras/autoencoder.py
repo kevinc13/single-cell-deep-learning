@@ -379,6 +379,8 @@ class AdversarialAutoencoder(GenerativeAutoencoder, DeepAutoencoder):
         if "stochastic" in self.config:
             self.stochastic = self.config["stochastic"]
 
+        super(AdversarialAutoencoder, self).setup()
+
     def build(self):
         if self.stochastic:
             self._build_stochastic_encoder()
@@ -532,7 +534,6 @@ class AdversarialAutoencoder(GenerativeAutoencoder, DeepAutoencoder):
                               reconstruction_loss, d_loss))
 
             if do_validation:
-                print("doing validation")
                 x_valid = validation_dataset.features
                 val_recon_loss = self.autoencoder_model.evaluate(
                     x_valid, x_valid, batch_size=batch_size)
@@ -551,7 +552,7 @@ class AdversarialAutoencoder(GenerativeAutoencoder, DeepAutoencoder):
                 val_d_loss = val_d_loss_prior + val_d_loss_posterior
 
                 val_adversarial_loss = self.adversarial_model.evaluate(
-                    x_valid, np.ones(len(x_valid)))
+                    x_valid, np.zeros(len(x_valid)))
 
                 ae_epoch_logs["val_loss"] = val_recon_loss
                 disc_epoch_logs["val_loss"] = val_d_loss

@@ -13,15 +13,15 @@ library(scater)
 source("evaluation.R")
 
 # Configuration ----------------------------------------------------------------
-dataset.dir <- "GSE94820_PBMC/processed/pbmc.500g.SCESet.rds"
-pca.ntop <- 500
-pca.ncomponents <- 10
-results.dir <- "GSE94820_PBMC/pca_500g"
+# dataset.dir <- "Usokin/processed/usokin.100g.standardized.txt"
+# pca.ntop <- 500
+# pca.ncomponents <- 10
+# results.dir <- "usokin/pca_100g"
 
-experiment.dir <- "pbmc"
+experiment.dir <- "pbmc/vae"
 model.name <- "PBMCAE_FINAL"
 model.type <- "ae"
-output.file <- "clustering_results_forcek7.txt"
+output.file <- "clustering_results_forcek4.txt"
 
 latent.reps.col.start <- 2
 latent.reps.col.end <- -1
@@ -90,6 +90,8 @@ benchmarkModelSelectionExperiment <- function(experiment.dir,
                                                 max.k, force.k=force.k)
     catln("Finished evaluating: ", exp.name)
     
+    plotVAELosses(model.dir)
+    
     rownames(evaluation$clustering.results)[1] <- exp.name
     row <- evaluation$clustering.results
     
@@ -132,43 +134,38 @@ benchmarkModelSelectionExperiment <- function(experiment.dir,
   }
 }
 
-benchmarkPCA <- function(dataset.file, labels.col, output.dir,
-                         max.k, force.k=NA, clust.alg="km", clust.dist="euclidean",
-                         ncomponents=10, ntop=500) {
-  if (!dir.exists(output.dir)) {
-    dir.create(output.dir, recursive=TRUE)
-  }
-  
-  dataset <- readRDS(dataset.file)
-  labels <- pData(dataset)[,labels.col]
-  
-  pca <- plotPCA(dataset, ncomponents=ncomponents,
-                 return_SCESet=TRUE, scale_features=TRUE,
-                 draw_plot=FALSE, ntop=ntop)
-  latent.reps <- reducedDimension(pca)
-  
-  evaluation <- evaluateLatentRepresentations(output.dir,
-                                              latent.reps, labels,
-                                              clust.alg, clust.dist,
-                                              max.k, force.k=force.k)
-  catln("Finished evaluating PCA")
-  
-  if (is.na(force.k)) {
-    output.file <- paste("clustering_results_maxk", max.k, ".txt", sep="")
-  } else {
-    output.file <- paste("clustering_results_maxk", max.k,
-                         "_forcek", force.k, ".txt", sep="")
-  }
-  
-  write.table(evaluation$clustering.results,
-              file=paste(output.dir, "/", output.file, sep=""),
-              sep="\t", quote=FALSE, row.names=FALSE, col.names=TRUE)
-}
-
-# benchmarkPCA(
-#   paste(base.dir, "/data/", dataset.dir, sep=""),
-#   labels.col, paste(base.dir, "/results/", results.dir, sep=""),
-#   max.k, force.k, ncomponents=pca.ncomponents, ntop=pca.ntop)
+# benchmarkPCA <- function(dataset.file, labels.col, output.dir,
+#                          max.k, force.k=NA, clust.alg="km", clust.dist="euclidean",
+#                          ncomponents=10, ntop=500) {
+#   if (!dir.exists(output.dir)) {
+#     dir.create(output.dir, recursive=TRUE)
+#   }
+#   
+#   dataset <- readRDS(dataset.file)
+#   labels <- pData(dataset)[,labels.col]
+#   
+#   pca <- plotPCA(dataset, ncomponents=ncomponents,
+#                  return_SCESet=TRUE, scale_features=TRUE,
+#                  draw_plot=FALSE, ntop=ntop)
+#   latent.reps <- reducedDimension(pca)
+#   
+#   evaluation <- evaluateLatentRepresentations(output.dir,
+#                                               latent.reps, labels,
+#                                               clust.alg, clust.dist,
+#                                               max.k, force.k=force.k)
+#   catln("Finished evaluating PCA")
+#   
+#   if (is.na(force.k)) {
+#     output.file <- paste("clustering_results_maxk", max.k, ".txt", sep="")
+#   } else {
+#     output.file <- paste("clustering_results_maxk", max.k,
+#                          "_forcek", force.k, ".txt", sep="")
+#   }
+#   
+#   write.table(evaluation$clustering.results,
+#               file=paste(output.dir, "/", output.file, sep=""),
+#               sep="\t", quote=FALSE, row.names=FALSE, col.names=TRUE)
+# }
 
 benchmarkModelSelectionExperiment(experiment.dir,
                                   model.name, model.type,

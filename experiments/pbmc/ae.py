@@ -5,13 +5,15 @@ from __future__ import (
 from math import log
 
 import numpy as np
+import pandas as pd
+from sklearn import preprocessing
 from hyperopt import hp
 
 from framework.common.experiment import HyperoptExperiment, \
     CrossValidationExperiment
 from framework.common.sampling import stratified_kfold
-from framework.common.util import read_data_table, save_data_table
 from framework.keras.autoencoder import DeepAutoencoder as AE
+
 
 N_EVALS = 100
 N_FOLDS = 5
@@ -44,13 +46,14 @@ class TrainPBMCAE(CrossValidationExperiment, HyperoptExperiment):
     def load_data(self):
         filepath = "{}/data/GSE94820_PBMC/processed/pbmc.{}g.txt".format(
             self.root_dir, self.input_size)
-        df = np.array(read_data_table(filepath))
-        features = df[1:, 1:-1]
+        df = pd.read_csv(filepath, sep="\t", header=0, index_col=0)
+        features = df.iloc[:, 0:-1].values.astype(dtype=np.float64)
+        features_scaled = preprocessing.scale(features)
 
-        cell_ids = df[1:, 0]
-        cell_types = df[1:, -1]
+        cell_ids = df.index.values
+        cell_types = df.iloc[:, -1].values
 
-        return cell_ids, features, cell_types
+        return cell_ids, features_scaled, cell_types
 
     def get_model_config(self, case_config):
         model_name = "{}_PBMCAE".format(self.case_counter)

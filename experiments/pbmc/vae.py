@@ -1,14 +1,14 @@
+from math import log
+import numpy as np
+import pandas as pd
 from hyperopt import hp
+from sklearn import preprocessing
 
+from framework.common.util import save_data_table
 from framework.common.experiment import (
     CrossValidationExperiment, HyperoptExperiment
 )
 from framework.common.sampling import stratified_kfold
-
-import numpy as np
-from math import log
-
-from framework.common.util import read_data_table, save_data_table
 from framework.keras.autoencoder import VariationalAutoencoder as VAE
 
 N_EVALS = 100
@@ -42,13 +42,14 @@ class TrainPBMCVAE(CrossValidationExperiment, HyperoptExperiment):
     def load_data(self):
         filepath = "{}/data/GSE94820_PBMC/processed/pbmc.{}g.txt".format(
             self.root_dir, self.input_size)
-        df = np.array(read_data_table(filepath))
-        features = df[1:, 1:-1]
+        df = pd.read_csv(filepath, sep="\t", header=0, index_col=0)
+        features = df.iloc[:, 0:-1].values.astype(dtype=np.float64)
+        features_scaled = preprocessing.scale(features)
 
-        cell_ids = df[1:, 0]
-        cell_types = df[1:, -1]
+        cell_ids = df.index.values
+        cell_types = df.iloc[:, -1].values
 
-        return cell_ids, features, cell_types
+        return cell_ids, features_scaled, cell_types
 
     def get_model_config(self, case_config):
         model_name = "{}_PBMCVAE".format(self.case_counter)
@@ -59,16 +60,7 @@ class TrainPBMCVAE(CrossValidationExperiment, HyperoptExperiment):
             encoder_layers.append("Dense:{}:activation='{}'".format(
                 size, case_config["activation"]))
             encoder_layers.append("BatchNormalization")
-
-        if case_config["optimizer"]["name"] == "sgd":
-            optimizer = "{}:lr={}:momentum={}:nesterov=True".format(
-                case_config["optimizer"]["name"],
-                case_config["optimizer"]["lr"],
-                case_config["optimizer"]["momentum"])
-        else:
-            optimizer = "{}:lr={}".format(
-                case_config["optimizer"]["name"],
-                case_config["optimizer"]["lr"])
+        optimizer = "adam:lr={}".format(case_config["optimizer_lr"])
 
         model_config = {
             "name": model_name,
@@ -95,11 +87,13 @@ class TrainPBMCVAE(CrossValidationExperiment, HyperoptExperiment):
         return model_config
 
     def train_final_vae(self, model_config):
-        model_config["continuous"] = True
-        model_config["tensorboard"] = True
-        model_config["checkpoint"] = True
-        model_config["early_stopping_metric"] = "loss"
-        model_config["checkpoint_metric"] = "loss"
+        model_config["autoencoder_callbacks"]["tensorboard"] = True
+        model_config["autoencoder_callbacks"]["checkpoint"] = {
+            "metric": "loss",
+            "file": "autoencoder_model.weights.h5"
+        }
+        model_config["autoencoder_callbacks"]["early_stopping"]["metric"] \
+            = "loss"
 
         results = self.train_final_model(model_config)
         final_vae = results["model"]
@@ -111,15 +105,13 @@ class TrainPBMCVAE(CrossValidationExperiment, HyperoptExperiment):
         results = np.hstack((
             np.expand_dims(full_dataset.sample_data[0], axis=1),
             latent_reps,
-            np.expand_dims(full_dataset.sample_data[1], axis=1),
-            np.expand_dims(full_dataset.sample_data[2], axis=1)
+            np.expand_dims(full_dataset.sample_data[1], axis=1)
         ))
 
         header = ["cell_ids"]
         for l in range(1, model_config["latent_size"] + 1):
             header.append("dim{}".format(l))
         header.append("cell_type")
-        header.append("cell_subtype")
         header = np.array(header)
 
         results = np.vstack((header, results))
@@ -178,35 +170,146 @@ class TrainPBMCVAE(CrossValidationExperiment, HyperoptExperiment):
         self.logger.info("EXPERIMENT END")
 
 
-class Train100gPBMCVAE(TrainPBMCVAE):
+class Train100g1LayerPBMCVAE(TrainPBMCVAE):
     def __init__(self, debug=False):
-        super(Train100gPBMCVAE, self).__init__(100, debug=debug)
+        super(Train100g1LayerPBMCVAE, self).__init__(100, debug=debug)
 
     def hyperopt_search_space(self):
         return {
             "encoder_layer_sizes": [
-                hp.choice("layer1", [])
+                hp.choice("layer1", [50, 100, 150, 200])
             ],
             "latent_size": hp.choice(
-                "latent_size", []),
+                "latent_size", [10, 15, 20, 25]),
             "activation": hp.choice(
                 "activation", ["elu", "tanh"]),
             "batch_size": hp.choice(
-                "batch_size", [10, 25]),
-            "optimizer": hp.choice(
-                "optimizer", [
-                    {
-                        "name": "adam",
-                        "lr": hp.loguniform(
-                            "adam_lr", -6 * log(10), -2 * log(10))
-                    },
-                    {
-                        "name": "sgd",
-                        "lr": hp.loguniform(
-                            "sgd_lr", -8 * log(10), -4 * log(10)),
-                        "momentum": hp.choice(
-                            "sgd_momentum", [0.5, 0.9, 0.95, 0.99])
-                    }
-                ])
+                "batch_size", [10, 25, 50]),
+            "optimizer_lr": hp.loguniform(
+                "optimizer_lr", -4 * log(10), -2 * log(10))
         }
 
+
+class Train100g2LayerPBMCVAE(TrainPBMCVAE):
+    def __init__(self, debug=False):
+        super(Train100g2LayerPBMCVAE, self).__init__(100, debug=debug)
+
+    def hyperopt_search_space(self):
+        return {
+            "encoder_layer_sizes": [
+                hp.choice("layer1", [100, 150, 200]),
+                hp.choice("layer2", [25, 50, 100, 150, 200])
+            ],
+            "latent_size": hp.choice(
+                "latent_size", [10, 15, 20, 25]),
+            "activation": hp.choice(
+                "activation", ["elu", "tanh"]),
+            "batch_size": hp.choice(
+                "batch_size", [10, 25, 50]),
+            "optimizer_lr": hp.loguniform(
+                "optimizer_lr", -4 * log(10), -2 * log(10))
+        }
+
+
+class Train200g1LayerPBMCVAE(TrainPBMCVAE):
+    def __init__(self, debug=False):
+        super(Train200g1LayerPBMCVAE, self).__init__(200, debug=debug)
+
+    def hyperopt_search_space(self):
+        return {
+            "encoder_layer_sizes": [
+                hp.choice("layer1", [50, 100, 150, 200, 250, 300])
+            ],
+            "latent_size": hp.choice(
+                "latent_size", [10, 15, 20, 25]),
+            "activation": hp.choice(
+                "activation", ["elu", "tanh"]),
+            "batch_size": hp.choice(
+                "batch_size", [10, 25, 50]),
+            "optimizer_lr": hp.loguniform(
+                "optimizer_lr", -4 * log(10), -2 * log(10))
+        }
+
+
+class Train200g2LayerPBMCVAE(TrainPBMCVAE):
+    def __init__(self, debug=False):
+        super(Train200g2LayerPBMCVAE, self).__init__(200, debug=debug)
+
+    def hyperopt_search_space(self):
+        return {
+            "encoder_layer_sizes": [
+                hp.choice("layer1", [100, 150, 200, 250, 300]),
+                hp.choice("layer2", [50, 100, 150, 200, 250, 300])
+            ],
+            "latent_size": hp.choice(
+                "latent_size", [10, 15, 20, 25]),
+            "activation": hp.choice(
+                "activation", ["elu", "tanh"]),
+            "batch_size": hp.choice(
+                "batch_size", [10, 25, 50]),
+            "optimizer_lr": hp.loguniform(
+                "optimizer_lr", -4 * log(10), -2 * log(10))
+        }
+
+
+class Train500g1LayerPBMCVAE(TrainPBMCVAE):
+    def __init__(self, debug=False):
+        super(Train500g1LayerPBMCVAE, self).__init__(200, debug=debug)
+
+    def hyperopt_search_space(self):
+        return {
+            "encoder_layer_sizes": [
+                hp.choice("layer1", list(range(100, 550, 50)))
+            ],
+            "latent_size": hp.choice(
+                "latent_size", [10, 15, 20, 25]),
+            "activation": hp.choice(
+                "activation", ["elu", "tanh"]),
+            "batch_size": hp.choice(
+                "batch_size", [10, 25, 50]),
+            "optimizer_lr": hp.loguniform(
+                "optimizer_lr", -4 * log(10), -2 * log(10))
+        }
+
+
+class Train500g2LayerPBMCVAE(TrainPBMCVAE):
+    def __init__(self, debug=False):
+        super(Train500g2LayerPBMCVAE, self).__init__(200, debug=debug)
+
+    def hyperopt_search_space(self):
+        return {
+            "encoder_layer_sizes": [
+                hp.choice("layer1", list(range(350, 550, 50))),
+                hp.choice("layer2", list(range(100, 350, 50)))
+            ],
+            "latent_size": hp.choice(
+                "latent_size", [10, 15, 20, 25]),
+            "activation": hp.choice(
+                "activation", ["elu", "tanh"]),
+            "batch_size": hp.choice(
+                "batch_size", [10, 25, 50]),
+            "optimizer_lr": hp.loguniform(
+                "optimizer_lr", -4 * log(10), -2 * log(10))
+        }
+
+
+class Train500g3LayerPBMCVAE(TrainPBMCVAE):
+    def __init__(self, debug=False):
+        super(Train500g3LayerPBMCVAE, self).__init__(200, debug=debug)
+
+    def hyperopt_search_space(self):
+        return {
+            "encoder_layer_sizes": [
+                hp.choice("layer1", [400, 450, 500]),
+                hp.choice("layer2", [250, 300, 350]),
+                hp.choice("layer3", [50, 100, 150, 200])
+            ],
+            "latent_size": hp.choice(
+                "latent_size", [10, 15, 20, 25]),
+            "activation": hp.choice(
+                "activation", ["elu", "tanh"]),
+            "batch_size": hp.choice(
+                "batch_size", [10, 25, 50]),
+            "optimizer_lr": hp.loguniform(
+                "optimizer_lr", -4 * log(10), -2 * log(10))
+        }

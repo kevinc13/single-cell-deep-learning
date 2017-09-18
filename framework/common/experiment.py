@@ -2,12 +2,10 @@ from __future__ import (
     absolute_import, division, print_function, unicode_literals
 )
 
-import csv
 import logging
 import os
 import sys
 
-import six
 import numpy as np
 from collections import Iterable
 from hyperopt import fmin, tpe, Trials, space_eval, STATUS_OK, STATUS_FAIL

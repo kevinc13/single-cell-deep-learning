@@ -27,14 +27,13 @@ class TrainMNISTAAE(BaseExperiment):
 
         model_name = "MNIST_AAE"
         model_dir = self.get_model_dir(model_name)
-
         create_dir(model_dir)
 
         model_config = {
             "name": model_name,
             "model_dir": model_dir,
 
-            "input_size": 784,
+            "input_shape": (784,),
             "encoder_layers": [
                 "Dense:1000:activation='relu'",
                 "Dense:1000:activation='relu'",
@@ -59,7 +58,6 @@ class TrainMNISTAAE(BaseExperiment):
                 }
             },
             "discriminator_callbacks": {
-                "tensorboard": True,
                 "checkpoint": {
                     "metric": "loss",
                     "file": "discriminator_model.weights.h5",
