@@ -15,6 +15,10 @@ MNIST_data/
 !data/*
 !data/**/*.R
 
+# Jupyter Notebooks
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+
 # Exclude these files
 data/**/.Rhistory
 data/**/.DS_Store
