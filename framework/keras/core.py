@@ -14,8 +14,8 @@ from keras.callbacks import (
 
 from .callbacks import (
     TimeLogger, FileLogger,
-    TerminateOnNaN
-)
+    TerminateOnNaN,
+    TerminateOnExplodingMetric)
 
 
 class BaseModel(object):
@@ -105,6 +105,7 @@ class BaseModel(object):
                 patience=callback_config["early_stopping"]["patience"]))
 
         callbacks.append(TerminateOnNaN())
+        callbacks.append(TerminateOnExplodingMetric())
 
         return callbacks
 

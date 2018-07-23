@@ -1,6 +1,7 @@
 library(Biobase)
 library(data.table)
 library(scater)
+library(scran)
 
 setwd(paste("~/Documents/Research/XinghuaLuLab/single-cell-deep-learning/",
             "data/GSE72056_Melanoma", sep=""))
@@ -60,72 +61,108 @@ if (!file.exists("original/melanoma.TPM.rds")) {
 #### Data Processing ####
 melanoma <- readRDS("original/melanoma.TPM.rds")
 
-melanoma <- melanoma[,melanoma$cell_type != "unresolved"]
-
 ### ---------- Parameters ---------- ###
-n_genes <- 200
+only_malignant <- TRUE
+n_genes <- 1000
 standardize <- FALSE
 scale <- FALSE
 
+if (only_malignant) {
+  melanoma <- melanoma[,melanoma$cell_type == "malignant"]
+} else {
+  melanoma <- melanoma[,melanoma$cell_type != "unresolved"]
+}
+
 ### ---------- Gene Filtering ---------- ###
 melanoma.processed <- melanoma
+if (!only_malignant) {
+  melanoma.processed <- melanoma.processed[
+    ,melanoma$non_malignant_cell_type != "unresolved"]
+}
 
 # Filter out dropout genes
 low_exp.filter <- rowSums(tpm(melanoma.processed) == 0) > (ncol(melanoma.processed) * 0.9)
 melanoma.processed <- melanoma.processed[!low_exp.filter,]
 
+# Filter out genes not included in TCGA dataset
+tcga_gene_list <- readRDS("../TCGA/original/tcga_gene_symbol_list.rds")
+tcga.filter <- rownames(melanoma.processed) %in% tcga_gene_list
+melanoma.processed <- melanoma.processed[tcga.filter,]
+
+### ---------- Normalize Dataset (Remove Batch Effects) ---------- ###
+# design <- model.matrix(~as.factor(melanoma.processed$tumor_id))
+# melanoma.processed <- normalizeExprs(melanoma.processed, 
+#                                      design=design)
+
 ### ---------- Select Most Variable Genes ---------- ###
-library(e1071)
-exprs <- exprs(melanoma.processed[,melanoma$non_malignant_cell_type != "unresolved"])
+var.fit <- trendVar(melanoma.processed, use.spikes=FALSE)
+var.table <- decomposeVar(melanoma.processed, var.fit, get.spikes=FALSE)
+var.table <- var.table[var.table$FDR <= 0.05,]
 
-genes_sd <- apply(exprs, 1, sd, na.rm=TRUE)
-genes_mean <- rowMeans(exprs, na.rm=TRUE)
-genes_cv <- genes_sd/genes_mean
-
-mean_cv_model <- svm(log2(genes_cv) ~ log2(genes_mean))
-predicted_log2cv <- predict(mean_cv_model, genes_mean)
-gene_scores <- log2(genes_cv) - predicted_log2cv
-
-var.filter <- names(sort(gene_scores, decreasing=TRUE)[1:n_genes])
-
+var.filter <- rownames(var.table)[order(var.table$bio, decreasing=TRUE)]
+var.filter <- var.filter[1:n_genes]
 melanoma.processed <- melanoma.processed[var.filter,]
 
-rm(var.filter)
-rm(exprs)
-rm(genes_sd)
-rm(genes_mean)
-rm(genes_cv)
-rm(mean_cv_model)
-rm(predicted_log2cv)
+remove(var.table)
+remove(var.filter)
+remove(var.fit)
+
+# library(e1071)
+# if (!only_malignant) {
+#   exprs <- exprs(melanoma.processed[
+#     ,melanoma$non_malignant_cell_type != "unresolved"])
+# } else {
+#   exprs <- exprs(melanoma.processed)
+# }
+# genes_sd <- apply(exprs, 1, sd, na.rm=TRUE)
+# genes_mean <- rowMeans(exprs, na.rm=TRUE)
+# genes_cv <- genes_sd/genes_mean
+# 
+# mean_cv_model <- svm(log2(genes_cv) ~ log2(genes_mean))
+# predicted_log2cv <- predict(mean_cv_model, genes_mean)
+# gene_scores <- log2(genes_cv) - predicted_log2cv
+# 
+# var.filter <- names(sort(gene_scores, decreasing=TRUE)[1:n_genes])
+# 
+# melanoma.processed <- melanoma.processed[var.filter,]
+# 
+# rm(var.filter)
+# rm(exprs)
+# rm(genes_sd)
+# rm(genes_mean)
+# rm(genes_cv)
+# rm(mean_cv_model)
+# rm(predicted_log2cv)
 
 # plotTSNE(melanoma.processed, colour_by="non_malignant_cell_type")
 
 # ---------- Standardize Expression Values to N(0, 1) ---------- #
-if (standardize) {
-    standardize_gene <- function(x) { (x - mean(x))/sd(x) }
-    exprs.scaled <- t(apply(exprs(melanoma.processed), 1, standardize_gene))
-    exprs(melanoma.processed) <- exprs.scaled
-    
-    rm(standardize_gene)
-    rm(exprs.scaled)   
-}
+# if (standardize) {
+    # standardize_gene <- function(x) { (x - mean(x))/sd(x) }
+    # exprs.scaled <- t(apply(exprs(melanoma.processed), 1, standardize_gene))
+    # exprs(melanoma.processed) <- exprs.scaled
+#     
+#     rm(standardize_gene)
+#     rm(exprs.scaled)   
+# }
+# 
+# # ---------- Scale Expression Values to [0, 1] ---------- #
+# if (scale) {
+#     scale_gene <- function(x) { (x - min(x))/(max(x) - min(x)) }
+#     exprs.scaled <- t(apply(exprs(melanoma.processed), 1, scale_gene))
+#     exprs(melanoma.processed) <- exprs.scaled
+#     
+#     rm(scale_gene)
+#     rm(exprs.scaled)    
+# }
 
-# ---------- Scale Expression Values to [0, 1] ---------- #
-if (scale) {
-    scale_gene <- function(x) { (x - min(x))/(max(x) - min(x)) }
-    exprs.scaled <- t(apply(exprs(melanoma.processed), 1, scale_gene))
-    exprs(melanoma.processed) <- exprs.scaled
-    
-    rm(scale_gene)
-    rm(exprs.scaled)    
-}
-
-# ---------- Create VAE-ready Benchmark Dataset ---------- #
+# ---------- Create Dataset ---------- #
 df <- as.data.frame(t(exprs(melanoma.processed)))
-df$cell_type <- melanoma.processed$cell_type
-
-df <- cbind(rownames(df), df)
-colnames(df)[1] <- "cell_id"
+if (!only_malignant) {
+  df$cell_type <- melanoma.processed$cell_type 
+}
+df <- cbind(rownames(df), melanoma.processed$tumor_id, df)
+colnames(df)[1:2] <- c("cell_id", "tumor_id")
 
 norm_technique <- NA
 if (scale) {
@@ -134,28 +171,34 @@ if (scale) {
     norm_technique <- "standardized"
 }
 
+if (only_malignant) {
+  name <- "malignant_cells"
+} else {
+  name <- "all_cells"
+}
+
 if (!is.na(norm_technique)) {
   write.table(df,
               file=paste(
-                "processed/melanoma.", n_genes,
+                "processed/", name, ".", n_genes,
                 "g.", norm_technique, ".txt", sep=""),
               quote=FALSE, row.names=FALSE,
               col.names=TRUE,
               sep="\t")
-  
+
   saveRDS(melanoma.processed,
-          paste("processed/melanoma.", n_genes,
-                "g.", norm_technique, ".SCESet.rds", sep="")) 
+          paste("processed/", name, ".", n_genes,
+                "g.", norm_technique, ".SCESet.rds", sep=""))
 } else {
   write.table(df,
               file=paste(
-                "processed/melanoma.", n_genes, "g.txt", sep=""),
+                "processed/", name, ".", n_genes, "g.txt", sep=""),
               quote=FALSE, row.names=FALSE,
               col.names=TRUE,
               sep="\t")
-  
+
   saveRDS(melanoma.processed,
-          paste("processed/melanoma.", n_genes, "g.SCESet.rds", sep=""))
+          paste("processed/", name, ".", n_genes, "g.SCESet.rds", sep=""))
 }
 
 

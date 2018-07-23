@@ -20,15 +20,21 @@ MNIST_data/
 */.ipynb_checkpoints/*
 
 # Exclude these files
+.Rhistory
 data/**/.Rhistory
 data/**/.DS_Store
 
-# Ignore results (size considerations)
+# Ignore results and slurm logs
 results/*
+slurm/archive/
+*.out
 
 # JetBrains IDE
 .idea/
 .Rproj.user
+
+# Visual Studio Code
+.vscode/
 
 # Office Documents
 ~$*.xls*

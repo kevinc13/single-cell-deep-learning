@@ -1,6 +1,7 @@
 library(Biobase)
 library(data.table)
 library(scater)
+library(scran)
 
 setwd(paste("~/Documents/Research/XinghuaLuLab/single-cell-deep-learning/",
             "data/GSE75688_Breast_Cancer", sep=""))
@@ -68,9 +69,10 @@ n_genes <- 1000
 standardize <- FALSE
 scale <- FALSE
 
-### ---------- Gene Filtering ---------- ###
+# Only include single cell samples
 breast.processed <- breast[,breast$sample_type == "single_cell"]
 
+### ---------- Gene Filtering ---------- ###
 # Only include protein coding genes
 protein_coding.filter <- fData(breast.processed)$gene_type == "protein_coding"
 breast.processed <- breast.processed[protein_coding.filter,]
@@ -79,40 +81,65 @@ breast.processed <- breast.processed[protein_coding.filter,]
 low_exp.filter <- rowSums(tpm(breast.processed) == 0) > (ncol(breast.processed) * 0.9)
 breast.processed <- breast.processed[!low_exp.filter,]
 
+# Filter out genes not included in TCGA dataset
+tcga_gene_list <- readRDS("../TCGA/original/tcga_gene_symbol_list.rds")
+tcga.filter <- fData(breast.processed)$symbol %in% tcga_gene_list
+breast.processed <- breast.processed[tcga.filter,]
+
 remove(low_exp.filter)
 remove(protein_coding.filter)
+remove(tcga_gene_list)
+remove(tcga.filter)
+
+### ---------- Correct for Intertumoral Variability ---------- ###
+# design <- model.matrix(~breast.processed$tumor_id)
+# breast.processed <- normalizeExprs(breast.processed, design=design)
 
 ### ---------- Select Most Variable Genes ---------- ###
-library(e1071)
-exprs <- exprs(breast.processed)
 
-genes_sd <- apply(exprs, 1, sd, na.rm=TRUE)
-genes_mean <- rowMeans(exprs, na.rm=TRUE)
-genes_cv <- genes_sd/genes_mean
-
-mean_cv_model <- svm(log2(genes_cv) ~ log2(genes_mean))
-predicted_log2cv <- predict(mean_cv_model, genes_mean)
-gene_scores <- log2(genes_cv) - predicted_log2cv
-
-var.filter <- names(sort(gene_scores, decreasing=TRUE)[1:n_genes])
-
+# Using trendVar from package 'scran'
+# var.fit <- trendVar(breast.processed, use.spikes=FALSE, design=design)
+var.fit <- trendVar(breast.processed, use.spikes=FALSE)
+var.table <- decomposeVar(breast.processed, var.fit, get.spikes=FALSE)
+var.table <- var.table[var.table$FDR <= 0.05,]
+var.filter <- rownames(var.table)[order(var.table$bio, decreasing=TRUE)]
+var.filter <- var.filter[1:n_genes]
 breast.processed <- breast.processed[var.filter,]
 
-rm(var.filter)
-rm(exprs)
-rm(genes_sd)
-rm(genes_mean)
-rm(genes_cv)
-rm(mean_cv_model)
-rm(predicted_log2cv)
+remove(var.table)
+remove(var.filter)
+remove(var.fit)
 
-# plotTSNE(breast.processed, colour_by="tumor_type")
+# Using SVM model
+# library(e1071)
+# exprs <- exprs(breast.processed)
+# 
+# genes_sd <- apply(exprs, 1, sd, na.rm=TRUE)
+# genes_mean <- rowMeans(exprs, na.rm=TRUE)
+# genes_cv <- genes_sd/genes_mean
+# 
+# mean_cv_model <- svm(log2(genes_cv) ~ log2(genes_mean))
+# predicted_log2cv <- predict(mean_cv_model, genes_mean)
+# gene_scores <- log2(genes_cv) - predicted_log2cv
+# 
+# var.filter <- names(sort(gene_scores, decreasing=TRUE)[1:n_genes])
+# breast.processed <- breast.processed[var.filter,]
+
+# rm(var.filter)
+# rm(exprs)
+# rm(genes_sd)
+# rm(genes_mean)
+# rm(genes_cv)
+# rm(mean_cv_model)
+# rm(predicted_log2cv)
+
+# plotTSNE(breast.processed, colour_by="tumor_id")
 
 # ---------- Standardize Expression Values to N(0, 1) ---------- #
 if (standardize) {
   standardize_gene <- function(x) { (x - mean(x))/sd(x) }
-  exprs.scaled <- t(apply(exprs(breast.processed), 1, standardize_gene))
-  exprs(breast.processed) <- exprs.scaled
+  exprs.standardized <- t(apply(exprs(breast.processed), 1, standardize_gene))
+  exprs(breast.processed) <- exprs.standardized
   
   rm(standardize_gene)
   rm(exprs.scaled)   
@@ -132,8 +159,9 @@ if (scale) {
 df <- as.data.frame(t(exprs(breast.processed)))
 colnames(df) <- fData(breast.processed)$symbol
 
-df <- cbind(rownames(df), df)
-colnames(df)[1] <- "cell_id"
+df <- cbind(rownames(df), breast.processed$tumor_id, 
+            breast.processed$tumor_type, df)
+colnames(df)[1:3] <- c("cell_id", "tumor_id", "tumor_type")
 
 norm_technique <- NA
 if (scale) {
@@ -141,8 +169,6 @@ if (scale) {
 } else if (standardize) {
   norm_technique <- "standardized"
 }
-
-dir.create("processed", showWarnings = FALSE)
 
 if (!is.na(norm_technique)) {
   write.table(df,
@@ -152,7 +178,7 @@ if (!is.na(norm_technique)) {
               quote=FALSE, row.names=FALSE,
               col.names=TRUE,
               sep="\t")
-  
+
   saveRDS(breast.processed,
           paste("processed/breast.", n_genes,
                 "g.", norm_technique, ".SCESet.rds", sep=""))
@@ -163,7 +189,7 @@ if (!is.na(norm_technique)) {
               quote=FALSE, row.names=FALSE,
               col.names=TRUE,
               sep="\t")
-  
+
   saveRDS(breast.processed,
           paste("processed/breast.", n_genes, "g.SCESet.rds", sep=""))
 }

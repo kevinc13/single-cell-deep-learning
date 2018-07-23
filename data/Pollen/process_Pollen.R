@@ -9,7 +9,7 @@ setwd(paste("~/Documents/Research/XinghuaLuLab/single-cell-deep-learning/",
 pollen <- readRDS("original/pollen.rds")
 
 ### ---------- Parameters ---------- ###
-n_genes <- 1000
+n_genes <- 5000
 standardize <- FALSE
 scale <- FALSE
 
@@ -22,28 +22,42 @@ low_exp.filter <- rowSums(tpm(pollen.processed) == 0) >
 pollen.processed <- pollen.processed[!low_exp.filter,]
 
 ### ---------- Select Most Variable Genes ---------- ###
-library(e1071)
-exprs <- exprs(pollen.processed)
+var.fit <- trendVar(pollen.processed, use.spikes=FALSE)
+var.table <- decomposeVar(pollen.processed, var.fit)
+var.table <- var.table[var.table$FDR <= 0.05,]
 
-genes_sd <- apply(exprs, 1, sd, na.rm=TRUE)
-genes_mean <- rowMeans(exprs, na.rm=TRUE)
-genes_cv <- genes_sd/genes_mean
-
-mean_cv_model <- svm(log2(genes_cv) ~ log2(genes_mean))
-predicted_log2cv <- predict(mean_cv_model, genes_mean)
-gene_scores <- log2(genes_cv) - predicted_log2cv
-
-var.filter <- names(sort(gene_scores, decreasing=TRUE)[1:n_genes])
+var.filter <- rownames(var.table)[order(var.table$bio, decreasing=TRUE)]
+var.filter <- var.filter[1:n_genes]
 
 pollen.processed <- pollen.processed[var.filter,]
 
-rm(var.filter)
-rm(exprs)
-rm(genes_sd)
-rm(genes_mean)
-rm(genes_cv)
-rm(mean_cv_model)
-rm(predicted_log2cv)
+remove(var.fit)
+remove(var.table)
+remove(var.filter)
+
+
+# library(e1071)
+# exprs <- exprs(pollen.processed)
+# 
+# genes_sd <- apply(exprs, 1, sd, na.rm=TRUE)
+# genes_mean <- rowMeans(exprs, na.rm=TRUE)
+# genes_cv <- genes_sd/genes_mean
+# 
+# mean_cv_model <- svm(log2(genes_cv) ~ log2(genes_mean))
+# predicted_log2cv <- predict(mean_cv_model, genes_mean)
+# gene_scores <- log2(genes_cv) - predicted_log2cv
+# 
+# var.filter <- names(sort(gene_scores, decreasing=TRUE)[1:n_genes])
+# 
+# pollen.processed <- pollen.processed[var.filter,]
+# 
+# rm(var.filter)
+# rm(exprs)
+# rm(genes_sd)
+# rm(genes_mean)
+# rm(genes_cv)
+# rm(mean_cv_model)
+# rm(predicted_log2cv)
 
 # plotTSNE(pollen.processed, colour_by="cell_type")
 

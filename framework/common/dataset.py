@@ -12,7 +12,7 @@ class Dataset:
     def __init__(self, 
                  features,
                  labels,
-                 sample_data=[],
+                 sample_data=None,
                  flatten=False,
                  to_one_hot=False):
         """
@@ -44,6 +44,9 @@ class Dataset:
             # Get next batch of 5 images
             (batch_features, batch_labels) = image_dataset.next_batch(5)
         """
+
+        if sample_data is None:
+            sample_data = []
 
         assert(features.shape[0] == labels.shape[0])
         self._features = features if not flatten else features.reshape(

@@ -1,21 +1,20 @@
-from __future__ import (
-    absolute_import, division, print_function, unicode_literals
-)
+from __future__ import (absolute_import, division, print_function,
+                        unicode_literals)
 
 import copy
-from operator import mul
 from functools import reduce
+from operator import mul
 
 import keras.backend as K
 import numpy as np
 from keras.callbacks import LambdaCallback
-from keras.layers import (
-    Dense, Input, Lambda
-)
-from keras.losses import mean_squared_error, binary_crossentropy
+from keras.layers import Concatenate, Dense, Input
 from keras.models import Model
 
 from framework.keras.callbacks import CallbackManager
+from framework.keras.distributions import (Bernoulli, Categorical, Gaussian,
+                                           MeanGaussian)
+
 from .core import BaseModel
 from .parser import DefinitionParser
 
@@ -30,9 +29,6 @@ class BaseAutoencoder(BaseModel):
             restore: Whether to restore a previously saved model
         """
         self.x = None
-        self.continuous = False
-
-        self.latent_output = None
         self.reconstructions = None
 
         self.encoder_model = None
@@ -43,18 +39,19 @@ class BaseAutoencoder(BaseModel):
         super(BaseAutoencoder, self).__init__(config, restore=restore)
 
     def setup(self):
-        if "continuous" in self.config:
-            self.continuous = self.config["continuous"]
-
         if "input_shape" not in self.config and \
                 not isinstance(self.config["input_shape"], tuple):
-            raise Exception(
-                "Must specify an input shape")
+            raise Exception("Must specify an input shape")
+
+        if "autoencoder_callbacks" in self.config and \
+                isinstance(self.config["autoencoder_callbacks"], dict):
+            self.autoencoder_callbacks = self.setup_callbacks(
+                self.config["autoencoder_callbacks"])
 
     def train(self, train_dataset,
               epochs=100, batch_size=100, validation_dataset=None):
         """
-        Train the model
+        Train the autoencoder model
 
         Args:
             train_dataset: Dataset of training examples
@@ -66,10 +63,6 @@ class BaseAutoencoder(BaseModel):
         Returns:
             Keras History object
         """
-        if "autoencoder_callbacks" in self.config and \
-                isinstance(self.config["autoencoder_callbacks"], dict):
-            self.autoencoder_callbacks = self.setup_callbacks(
-                self.config["autoencoder_callbacks"])
 
         if validation_dataset is not None:
             return self.autoencoder_model.fit(
@@ -93,19 +86,28 @@ class BaseAutoencoder(BaseModel):
             features, batch_size=batch_size, verbose=0)
 
     def evaluate(self, test_dataset, batch_size=100):
-        return self.autoencoder_model.evaluate(
+        metrics = self.autoencoder_model.evaluate(
             test_dataset.features, test_dataset.features,
             batch_size=batch_size, verbose=0)
+
+        return dict(zip(self.autoencoder_model.metrics_names, metrics))
 
 
 class DeepAutoencoder(BaseAutoencoder):
     """
     Vanilla (Deterministic) Deep Autoencoder
     """
+    def __init__(self, config, restore=False):
+        self.continuous = False
+        self.deterministic_latent_space = None
+        super(DeepAutoencoder, self).__init__(config, restore=restore)
+
     def build(self):
         """
         Builds the Keras model
         """
+        if "continuous" in self.config and self.config["continuous"]:
+            self.continuous = True
 
         self._build_deterministic_encoder()
         self._build_deterministic_decoder()
@@ -123,6 +125,12 @@ class DeepAutoencoder(BaseAutoencoder):
             metrics=metrics)
 
     def _build_deterministic_encoder(self):
+        if "latent_layer" in self.config:
+            latent_layer_def = self.config["latent_layer"]
+        else:
+            raise Exception("Must provide latent layer specification "
+                            "for a deterministic autoencoder")
+
         encoder_layer_defs = self.config["encoder_layers"]
         self.x = Input(shape=self.config["input_shape"], name="x")
 
@@ -135,34 +143,23 @@ class DeepAutoencoder(BaseAutoencoder):
                 layer = layer_ref(*args, **kw_args)
                 encoder_output = layer(encoder_output)
 
-            if "latent_layer" in self.config:
-                latent_layer_ref, args, kw_args = \
-                    DefinitionParser.parse_layer_definition(
-                        self.config["latent_layer"])
-
-                if latent_layer_ref != Dense:
-                    raise Exception("Latent layer must be a Dense layer")
-
-                encoder_output = latent_layer_ref(
-                    *args, name="latent_layer", **kw_args)(encoder_output)
-
-            self.latent_output = encoder_output
-            self.encoder_model = Model(self.x, self.latent_output)
+            latent_layer_ref, latent_layer_args, latent_layer_kw_args = \
+                DefinitionParser.parse_layer_definition(latent_layer_def)
+            if latent_layer_ref is not Dense:
+                raise Exception("Latent layer must be a Dense layer")
+            self.deterministic_latent_space = latent_layer_ref(
+                *latent_layer_args, **latent_layer_kw_args)(encoder_output)
+            self.encoder_model = Model(self.x, self.deterministic_latent_space)
 
     def _build_deterministic_decoder(self):
         if "decoder_layers" in self.config:
             decoder_layer_defs = self.config["decoder_layers"]
         else:
-            encoder_layers = self.config["encoder_layers"] \
-                if "latent_layer" in self.config else \
-                self.config["encoder_layers"][:-1]
-
-            decoder_layer_defs = list(reversed(encoder_layers))
+            decoder_layer_defs = list(reversed(self.config["encoder_layers"]))
 
         output_activation = "linear" if self.continuous else "sigmoid"
-
         with K.name_scope("decoder"):
-            decoder_output = self.latent_output
+            decoder_output = self.deterministic_latent_space
             for index, layer_def in enumerate(decoder_layer_defs):
                 layer_ref, args, kw_args = \
                     DefinitionParser.parse_layer_definition(layer_def)
@@ -170,45 +167,22 @@ class DeepAutoencoder(BaseAutoencoder):
                 decoder_output = layer(decoder_output)
 
             # Check output shape
-            output_shape = tuple([int(x) for x in decoder_output.shape[1:]])
-            if output_shape != self.config["input_shape"] and \
-                    len(self.config["input_shape"]) == 1:
-                self.reconstructions = Dense(
-                    self.config["input_shape"][0],
-                    activation=output_activation, name="reconstructions"
-                )(decoder_output)
-            elif output_shape == self.config["input_shape"]:
-                self.reconstructions = decoder_output
-            else:
-                raise Exception(
-                    "Output shape of decoder must match input shape")
+            self.reconstructions = Dense(
+                self.config["input_shape"][0],
+                activation=output_activation,
+                name="reconstructions")(decoder_output)
 
 
 class GenerativeAutoencoder(BaseAutoencoder):
     def __init__(self, config, restore=False):
-        self.latent_size = None
-        self.z_mean = None
-        self.z_log_var = None
-        self.decoder_log_var = None
-
         self.generator_model = None
-
+        self.generator_callbacks = []
         super(GenerativeAutoencoder, self).__init__(config, restore=restore)
 
-    def setup(self):
-        if "latent_size" in self.config:
-            self.latent_size = self.config["latent_size"]
-        else:
-            raise Exception(
-                "Must specify size of latent representation in the \
-                 model configuration")
-
-        super(GenerativeAutoencoder, self).setup()
-
-    def _build_stochastic_encoder(self):
-        encoder_layer_defs = self.config["encoder_layers"]
-
+    def _build_stochastic_encoder(self, *latent_dists):
         self.x = Input(shape=self.config["input_shape"], name="x")
+
+        encoder_layer_defs = self.config["encoder_layers"]
         with K.name_scope("encoder"):
             # Encoder
             encoder_output = self.x
@@ -218,26 +192,26 @@ class GenerativeAutoencoder(BaseAutoencoder):
                 layer = layer_ref(*args, **kw_args)
                 encoder_output = layer(encoder_output)
 
-            # Latent space
-            self.z_mean = Dense(self.latent_size, name="z_mean")(
-                encoder_output)
-            self.z_log_var = Dense(self.latent_size, name="z_log_var")(
-                encoder_output)
+            latent_space = []
+            for latent_dist in latent_dists:
+                latent_space.append(latent_dist(encoder_output))
 
-            self.latent_output = Lambda(self._sample, name="latent_layer")(
-                [self.z_mean, self.z_log_var])
-            self.encoder_model = Model(self.x, self.latent_output)
+            if len(latent_space) == 1:
+                return latent_space[0]
+            else:
+                return latent_space
 
-    def _build_stochastic_decoder(self):
+    def _build_stochastic_decoder(self, latent_space, output_dist):
         if "decoder_layers" in self.config:
             decoder_layer_defs = self.config["decoder_layers"]
         else:
             decoder_layer_defs = list(reversed(self.config["encoder_layers"]))
 
         # Decoder and Generator Models
-        generator_x = Input(shape=(self.latent_size,), name="generator_x")
+        latent_size = int(latent_space.shape[1])
+        generator_x = Input(shape=(latent_size,), name="generator_x")
 
-        decoder_output = self.latent_output
+        decoder_output = latent_space
         generator_output = generator_x
 
         for index, layer_def in enumerate(decoder_layer_defs):
@@ -248,52 +222,11 @@ class GenerativeAutoencoder(BaseAutoencoder):
             decoder_output = layer(decoder_output)
             generator_output = layer(generator_output)
 
-        if self.continuous:
-            # Output means
-            self.reconstructions = Dense(
-                self.config["input_shape"][0], activation="linear",
-                name="reconstructions"
-            )(decoder_output)
-            # Output log-variances
-            self.decoder_log_var = Dense(
-                self.config["input_shape"][0], activation="linear",
-                name="decoder_log_var"
-            )(decoder_output)
-
-            # Output of generator model
-            generator_output = Dense(
-                self.config["input_shape"][0], activation="linear",
-                name="generator_output"
-            )(generator_output)
-        else:
-            # Decoder output
-            self.reconstructions = Dense(
-                self.config["input_shape"][0], activation="sigmoid",
-                name="reconstructions"
-            )(decoder_output)
-
-            # Output of generator model
-            generator_output = Dense(
-                self.config["input_shape"][0], activation="sigmoid",
-                name="generator_output"
-            )(generator_output)
-
+        generator_output = output_dist(generator_output, name="reconstructions")
+        decoder_output = output_dist(decoder_output)
         self.generator_model = Model(generator_x, generator_output)
 
-    def _sample(self, args):
-        with K.name_scope("sampling"):
-            mean, log_var = args
-            epsilon = K.random_normal(
-                shape=(K.shape(self.x)[0], self.latent_size),
-                mean=0., stddev=1.0)
-            return mean + K.exp(log_var / 2) * epsilon
-
-    def negative_log_likelihood(self, y_true, y_pred):
-        with K.name_scope("negative_log_likelihood"):
-            return - K.sum(
-                -0.5 * np.log(2 * np.pi) - 0.5 * self.decoder_log_var -
-                0.5 * K.square(y_true - y_pred) / K.exp(self.decoder_log_var),
-                axis=-1)
+        return decoder_output
 
     def generate(self, z, batch_size=50):
         return self.generator_model.predict(
@@ -302,27 +235,51 @@ class GenerativeAutoencoder(BaseAutoencoder):
 
 class VariationalAutoencoder(GenerativeAutoencoder):
     def __init__(self, config, restore=False):
+        self.z_latent_dist = None
+        self.output_dist = None
         self.warmup_beta = None
+        self.optimizer = None
         super(VariationalAutoencoder, self).__init__(config, restore=restore)
 
+    def setup(self):
+        super(VariationalAutoencoder, self).setup()
+
+        if "latent_size" not in self.config:
+            raise Exception("Must specify size of latent space for VAE")
+        else:
+            self.z_latent_dist = Gaussian(self.config["latent_size"])
+
+        flat_input_size = reduce(mul, self.config["input_shape"])
+        if "continuous" in self.config and self.config["continuous"]:
+            self.output_dist = MeanGaussian(flat_input_size)
+        else:
+            self.output_dist = Bernoulli(flat_input_size)
+
+        if "optimizer" not in self.config:
+            raise Exception("Must specify optimizer to use for training")
+        else:
+            self.optimizer = DefinitionParser.parse_optimizer_definition(
+                self.config["optimizer"])
+
     def build(self):
-        self._build_stochastic_encoder()
-        self._build_stochastic_decoder()
+        latent_space = self._build_stochastic_encoder(self.z_latent_dist)
+        self.encoder_model = Model(self.x, latent_space)
+
+        self.reconstructions = self._build_stochastic_decoder(
+            latent_space, self.output_dist)
+        self.autoencoder_model = Model(self.x, self.reconstructions)
+        self.add_saveable_model("autoencoder_model", self.autoencoder_model)
 
         if "n_warmup_epochs" in self.config:
             self.warmup_beta = K.variable(value=0.1, name="warmup_beta")
             self.autoencoder_callbacks.append(LambdaCallback(
                 on_epoch_end=lambda epoch, logs: self._warmup(epoch)))
 
-        self.autoencoder_model = Model(self.x, self.reconstructions)
-        self.add_saveable_model("autoencoder_model", self.autoencoder_model)
-
         metrics = [] if "metrics" not in self.config else \
             copy.copy(self.config["metrics"])
         metrics += [self.reconstruction_loss, self.kl_divergence_loss]
         self.autoencoder_model.compile(
-            optimizer=DefinitionParser.parse_optimizer_definition(
-                self.config["optimizer"]),
+            optimizer=self.optimizer,
             loss=self._loss,
             metrics=metrics)
 
@@ -341,19 +298,15 @@ class VariationalAutoencoder(GenerativeAutoencoder):
             else:
                 return K.mean(reconstruction_loss + kl_divergence_loss)
 
-    def reconstruction_loss(self, y_true, y_pred):
-        if self.continuous:
-            # Calculate negative log-likelihood of P(X|z)
-            return self.negative_log_likelihood(y_true, y_pred)
-        else:
-            # Calculate binary cross-entropy
-            return K.sum(K.binary_crossentropy(y_true, y_pred), axis=-1)
+    def reconstruction_loss(self, y_true, _):
+        return self.output_dist.negative_log_likelihood(y_true)
 
     def kl_divergence_loss(self, *_):
         with K.name_scope("kl_divergence_loss"):
             return -0.5 * K.sum(
-                1 + self.z_log_var - K.exp(self.z_log_var) -
-                K.square(self.z_mean), axis=-1)
+                1 + self.z_latent_dist.log_var
+                - K.exp(self.z_latent_dist.log_var)
+                - K.square(self.z_latent_dist.mean), axis=-1)
 
     def _warmup(self, epoch):
         n_epochs = self.config["n_warmup_epochs"]
@@ -362,77 +315,75 @@ class VariationalAutoencoder(GenerativeAutoencoder):
         K.set_value(self.warmup_beta, warmup_beta)
 
 
-class AdversarialAutoencoder(GenerativeAutoencoder, DeepAutoencoder):
+class AdversarialAutoencoder(GenerativeAutoencoder):
     def __init__(self, config, restore=False):
-        self.stochastic = False
+        self.z_latent_dist = None
+        self.z_prior_dist = None
+        self.output_dist = None
 
-        self.discriminator_x = None
-        self.discriminator_layers = []
-        self.discriminator_model = None
-        self.discriminator_callbacks = []
+        self.z_discriminator_model = None
+        self.z_adversarial_model = None
 
-        self.adversarial_model = None
+        self.ae_optimizer = None
+        self.z_disc_optimizer = None
 
         super(AdversarialAutoencoder, self).__init__(config, restore=restore)
 
     def setup(self):
-        if "stochastic" in self.config:
-            self.stochastic = self.config["stochastic"]
-
         super(AdversarialAutoencoder, self).setup()
 
-    def build(self):
-        if self.stochastic:
-            self._build_stochastic_encoder()
-            self._build_stochastic_decoder()
+        if "z_prior_distribution" not in self.config:
+            raise Exception("Must specify prior distribution p(z) for a "
+                            "stochastic adversarial autoencoder")
         else:
-            self._build_deterministic_encoder()
-            self._build_deterministic_decoder()
+            self.z_prior_dist = \
+                DefinitionParser.parse_distribution_definition(
+                    self.config["z_prior_distribution"])
 
-        self.autoencoder_model = Model(self.x, self.reconstructions)
-        self.add_saveable_model("autoencoder", self.autoencoder_model)
-
-        self._build_discriminator()
-        self.adversarial_model = Model(
-            self.x, self.discriminator_model(self.encoder_model(self.x)))
-
-        ae_optimizer = DefinitionParser.parse_optimizer_definition(
-            self.config["autoencoder_optimizer"])
-        if "discriminator_optimizer" in self.config:
-            d_optimizer = DefinitionParser.parse_optimizer_definition(
-                self.config["discriminator_optimizer"])
+        if "z_latent_distribution" not in self.config:
+            raise Exception("Must specify latent distribution q(z|x) for a "
+                            "stochastic adversarial autoencoder")
         else:
-            d_optimizer = ae_optimizer
+            self.z_latent_dist = \
+                DefinitionParser.parse_distribution_definition(
+                    self.config["z_latent_distribution"])
 
-        self.discriminator_model.compile(optimizer=d_optimizer,
-                                         loss="binary_crossentropy")
-        self.autoencoder_model.compile(optimizer=ae_optimizer,
-                                       loss=self.reconstruction_loss)
-        # Freeze the discriminator model when training
-        # the adversarial network (enocder + discriminator)
-        self.discriminator_model.trainable = False
-        self.adversarial_model.compile(optimizer=d_optimizer,
-                                       loss="binary_crossentropy")
+        if "output_distribution" not in self.config:
+            raise Exception("Must specify output distribution p(x|z) for a "
+                            "stochastic adversarial autoencoder")
+        else:
+            self.output_dist = \
+                DefinitionParser.parse_distribution_definition(
+                    self.config["output_distribution"])
 
-    def reconstruction_loss(self, y_true, y_pred):
-        with K.name_scope("reconstruction_loss"):
-            if self.stochastic and self.continuous:
-                return K.mean(self.negative_log_likelihood(y_true, y_pred))
-            elif not self.stochastic and self.continuous:
-                return mean_squared_error(y_true, y_pred)
-            else:
-                return binary_crossentropy(y_true, y_pred)
+        if "autoencoder_optimizer" not in self.config:
+            raise Exception("Must specify the optimizer to use for the "
+                            "reconstruction training phase")
+        else:
+            self.ae_optimizer = DefinitionParser.parse_optimizer_definition(
+                self.config["autoencoder_optimizer"])
 
-    def _build_discriminator(self):
-        discriminator_layer_defs = self.config["discriminator_layers"]
+        if "z_discriminator_optimizer" in self.config:
+            self.z_disc_optimizer = \
+                DefinitionParser.parse_optimizer_definition(
+                    self.config["z_discriminator_optimizer"])
+        else:
+            self.z_disc_optimizer = self.ae_optimizer
 
-        if self.latent_size is None:
-            self.latent_size = int(self.latent_output.shape[1])
+    def reconstruction_loss(self, y_true, _):
+        return K.mean(self.output_dist.negative_log_likelihood(y_true))
 
-        self.discriminator_x = Input(
-            shape=(self.latent_size,), name="discriminator_x")
+    def _build_discriminator(self, latent_space, layer_defs=None):
+        if layer_defs is None:
+            discriminator_layer_defs = self.config["z_discriminator_layers"]
+        else:
+            discriminator_layer_defs = layer_defs
+
+        latent_size = int(latent_space.shape[1])
+        discriminator_x = Input(
+            shape=(latent_size,), name="discriminator_input")
         with K.name_scope("discriminator"):
-            discriminator_output = self.discriminator_x
+            discriminator_output = discriminator_x
             for index, layer_def in enumerate(discriminator_layer_defs):
                 layer_ref, args, kw_args = \
                     DefinitionParser.parse_layer_definition(layer_def)
@@ -444,25 +395,30 @@ class AdversarialAutoencoder(GenerativeAutoencoder, DeepAutoencoder):
                     1, activation="sigmoid", name="discriminator_output")(
                     discriminator_output)
 
-        self.discriminator_model = Model(
-            self.discriminator_x, discriminator_output)
+        return Model(discriminator_x, discriminator_output)
 
-    def train(self, train_dataset,
-              epochs=100, batch_size=100, validation_dataset=None):
+    def _setup_callback_manager(self, **train_params):
+        do_validation = "validation_dataset" in train_params and \
+                        train_params["validation_dataset"] is not None
 
-        do_validation = validation_dataset is not None
-        n_batches = train_dataset.num_examples // batch_size
-
-        callback_manager = CallbackManager(
-            epochs=epochs, batch_size=batch_size,
-            models={
+        callback_manager_params = {
+            "epochs": train_params["epochs"],
+            "batch_size": train_params["batch_size"],
+            "models": {
                 "autoencoder": self.autoencoder_model,
-                "discriminator": self.discriminator_model
-            },
-            do_validation=["autoencoder"],
-            validation_data=(
-                validation_dataset.features,
-                validation_dataset.features))
+                "z_discriminator": self.z_discriminator_model,
+                "z_adversarial": self.z_adversarial_model
+            }
+        }
+
+        if do_validation:
+            callback_manager_params["do_validation"] = ["autoencoder"]
+            callback_manager_params["validation_data"] = (
+                train_params["validation_dataset"].features,
+                train_params["validation_dataset"].features
+            )
+
+        callback_manager = CallbackManager(**callback_manager_params)
 
         # Add any additional callbacks for autoencoder model
         if "autoencoder_callbacks" in self.config and \
@@ -472,33 +428,578 @@ class AdversarialAutoencoder(GenerativeAutoencoder, DeepAutoencoder):
                     self.config["autoencoder_callbacks"]))
 
         # Add any additional callbacks for discriminator model
-        if "discriminator_callbacks" in self.config and \
-                isinstance(self.config["discriminator_callbacks"], dict):
+        if "z_discriminator_callbacks" in self.config and \
+                isinstance(self.config["z_discriminator_callbacks"], dict):
             callback_manager.add_callbacks(
-                "discriminator", self.setup_callbacks(
-                    self.config["discriminator_callbacks"]))
+                "z_discriminator", self.setup_callbacks(
+                    self.config["z_discriminator_callbacks"]))
 
+        # Add any additional callbacks for adversarial model
+        if "z_adversarial_callbacks" in self.config and \
+                isinstance(self.config["z_adversarial_callbacks"], dict):
+            callback_manager.add_callbacks(
+                "z_adversarial", self.setup_callbacks(
+                    self.config["z_adversarial_callbacks"]))
+
+        return callback_manager
+
+    def train(self, train_dataset, epochs=100, batch_size=100,
+              validation_dataset=None, verbose=1):
+        do_validation = validation_dataset is not None
+        n_batches = train_dataset.num_examples // batch_size
+
+        callback_manager = self._setup_callback_manager(
+            epochs=epochs, batch_size=batch_size,
+            validation_dataset=validation_dataset)
         callback_manager.setup()
         callback_manager.on_train_begin()
+
         for epoch in range(epochs):
+            # Begin epoch
             callback_manager.on_epoch_begin(epoch)
-            ae_epoch_logs = {}
-            disc_epoch_logs = {}
+
+            # Initialize logs to non-empty dictionaries (hence 'name' key)
+            ae_epoch_logs = {"name": "autoencoder"}
+            disc_epoch_logs = {"name": "z_discriminator"}
+            adv_epoch_logs = {"name": "z_adversarial"}
 
             train_dataset.shuffle()
             for batch in range(n_batches):
                 ae_batch_logs = {"batch": batch, "size": batch_size}
                 disc_batch_logs = {"batch": batch, "size": batch_size}
-
-                callback_manager.on_batch_begin(
-                    batch, ae_batch_logs, model_name="autoencoder")
-                callback_manager.on_batch_begin(
-                    batch, disc_batch_logs, model_name="discriminator")
+                adv_batch_logs = {"batch": batch, "size": batch_size}
+                log_string = "Batch {}/{} - ".format(batch + 1, n_batches)
 
                 # Get next batch of samples
                 x, _ = train_dataset.next_batch(batch_size)
 
-                # 1. Reconstruction Phase
+                # 1) Reconstruction Phase
+                callback_manager.on_batch_begin(
+                    batch, ae_batch_logs, model_name="autoencoder")
+                reconstruction_loss = \
+                    self.autoencoder_model.train_on_batch(x, x)
+                log_string += "Recon Loss: {:f}".format(reconstruction_loss)
+                ae_batch_logs["loss"] = reconstruction_loss
+                callback_manager.on_batch_end(
+                    batch, ae_batch_logs, model_name="autoencoder")
+                if callback_manager.stop_training:
+                    break
+
+                # 2) Regularization Phase
+                # 2A) Train discriminator
+                callback_manager.on_batch_begin(
+                    batch, disc_batch_logs, model_name="z_discriminator")
+                z_prior = self.z_prior_dist.sample(batch_size)
+                z_posterior = self.encoder_model.predict(x)
+                d_loss_prior = self.z_discriminator_model.train_on_batch(
+                    z_prior, [0.0] * batch_size)
+                d_loss_posterior = self.z_discriminator_model.train_on_batch(
+                    z_posterior, [1.0] * batch_size)
+                d_loss = d_loss_prior + d_loss_posterior
+                log_string += "|Disc Loss: {:f}".format(d_loss)
+                disc_batch_logs["loss"] = d_loss
+                disc_batch_logs["loss_prior"] = d_loss_prior
+                disc_batch_logs["loss_posterior"] = d_loss_posterior
+                callback_manager.on_batch_end(
+                    batch, disc_batch_logs, model_name="z_discriminator")
+                if callback_manager.stop_training:
+                    break
+
+                # 2B) Train encoder ("generator" of latent space)
+                callback_manager.on_batch_begin(
+                    batch, adv_batch_logs, model_name="z_adversarial")
+                adversarial_loss = self.z_adversarial_model.train_on_batch(
+                    x, [0.0] * batch_size)
+                log_string += "|Adv Loss: {:f}".format(adversarial_loss)
+                adv_batch_logs["loss"] = adversarial_loss
+                callback_manager.on_batch_end(
+                    batch, adv_batch_logs, model_name="z_adversarial")
+                if callback_manager.stop_training:
+                    break
+
+                if verbose == 2:
+                    print(log_string)
+
+            # Validation step
+            if do_validation:
+                val_losses = self.evaluate(
+                    validation_dataset, batch_size=batch_size)
+                ae_epoch_logs["val_loss"] = val_losses["ae_loss"]
+                disc_epoch_logs["val_loss"] = val_losses["z_disc_loss"]
+                adv_epoch_logs["val_loss"] = val_losses["z_adv_loss"]
+
+            callback_manager.on_epoch_end(
+                epoch, ae_epoch_logs, model_name="autoencoder")
+            callback_manager.on_epoch_end(
+                epoch, disc_epoch_logs, model_name="z_discriminator")
+            callback_manager.on_epoch_end(
+                epoch, adv_epoch_logs, model_name="z_adversarial")
+            if callback_manager.stop_training:
+                break
+
+            if verbose >= 1:
+                print("Epoch {}/{} - Recon Loss: {:f}|"
+                      "Disc Loss: {:f}|Adv Loss: {:f}"
+                      .format(epoch + 1, epochs, ae_epoch_logs["loss"],
+                              disc_epoch_logs["loss"], adv_epoch_logs["loss"]))
+        callback_manager.on_train_end()
+        return {k: v.callbacks[-1]
+                for k, v in callback_manager.callback_lists.items()}
+
+    def evaluate(self, test_dataset, batch_size=100):
+        x = test_dataset.features
+
+        ae_loss = self.autoencoder_model.evaluate(
+            x, x, batch_size=batch_size, verbose=0)
+
+        z_prior = self.z_prior_dist.sample(len(x))
+        z_posterior = self.encoder_model.predict(x)
+        d_loss_prior = self.z_discriminator_model.evaluate(
+            z_prior, [0.0] * len(z_prior), batch_size=batch_size, verbose=0)
+        d_loss_posterior = self.z_discriminator_model.evaluate(
+            z_posterior, [1.0] * len(z_posterior),
+            batch_size=batch_size, verbose=0)
+        d_loss = d_loss_prior + d_loss_posterior
+
+        adv_loss = self.z_adversarial_model.evaluate(
+            x, [0.0] * len(x), batch_size=batch_size, verbose=0)
+
+        total_loss = ae_loss + d_loss + adv_loss
+
+        return {
+            "ae_loss": ae_loss,
+            "z_disc_loss": d_loss,
+            "z_adv_loss": adv_loss,
+            "z_disc_loss_prior": d_loss_prior,
+            "z_disc_loss_posterior": d_loss_posterior,
+            "loss": total_loss
+        }
+
+
+class KadurinAdversarialAutoencoder(AdversarialAutoencoder):
+    def __init__(self, config, restore=False):
+        self.discriminative_power = None
+        self.z_combined_model = None
+
+        super(KadurinAdversarialAutoencoder, self).__init__(
+            config, restore=restore)
+
+    def setup(self):
+        super(KadurinAdversarialAutoencoder, self).setup()
+
+        if "discriminative_power" in self.config:
+            self.discriminative_power = self.config["discriminative_power"]
+
+    def build(self):
+        # Build encoder
+        latent_space = self._build_stochastic_encoder(self.z_latent_dist)
+        self.encoder_model = Model(self.x, latent_space)
+
+        # Build discriminator q(z|x)
+        self.z_discriminator_model = self._build_discriminator(latent_space)
+        self.z_discriminator_model.name = "discriminator_model"
+        self.add_saveable_model("z_discriminator", self.z_discriminator_model)
+
+        # Build decoder
+        self.reconstructions = self._build_stochastic_decoder(
+            latent_space, self.output_dist)
+
+        # Build combined autoencoder + adversarial model
+        self.autoencoder_model = Model(self.x, self.reconstructions)
+        self.z_adversarial_model = Model(
+            self.x, self.z_discriminator_model(self.encoder_model(self.x)))
+        self.z_combined_model = Model(
+            self.x, [
+                self.reconstructions,
+                self.z_discriminator_model(self.encoder_model(self.x))
+            ])
+        self.add_saveable_model("z_combined", self.z_combined_model)
+
+        # Compile models
+        self.z_discriminator_model.compile(optimizer=self.z_disc_optimizer,
+                                           loss="binary_crossentropy",
+                                           metrics=["accuracy"])
+        # Freeze the discriminator model when training
+        # the combined model
+        self.z_discriminator_model.trainable = False
+        self.z_combined_model.compile(
+            optimizer=self.ae_optimizer,
+            loss={
+                "reconstructions": self.reconstruction_loss,
+                "discriminator_model": "binary_crossentropy"
+            },
+            metrics={
+                "discriminator_model": "accuracy"
+            })
+
+    def _setup_callback_manager(self, **train_params):
+        do_validation = "validation_dataset" in train_params and \
+                        train_params["validation_dataset"] is not None
+
+        callback_manager_params = {
+            "epochs": train_params["epochs"],
+            "batch_size": train_params["batch_size"],
+            "models": {
+                "z_combined": self.z_combined_model,
+                "z_discriminator": self.z_discriminator_model,
+            }
+        }
+
+        callback_manager = CallbackManager(**callback_manager_params)
+
+        # Add any additional callbacks for autoencoder model
+        if "z_combined_callbacks" in self.config and \
+                isinstance(self.config["z_combined_callbacks"], dict):
+            callback_manager.add_callbacks(
+                "z_combined", self.setup_callbacks(
+                    self.config["z_combined_callbacks"]))
+
+        # Add any additional callbacks for discriminator model
+        if "z_discriminator_callbacks" in self.config and \
+                isinstance(self.config["z_discriminator_callbacks"], dict):
+            callback_manager.add_callbacks(
+                "z_discriminator", self.setup_callbacks(
+                    self.config["z_discriminator_callbacks"]))
+
+        return callback_manager
+
+    def train(self, train_dataset, epochs=100, batch_size=100,
+              validation_dataset=None, verbose=1):
+        do_validation = validation_dataset is not None
+        n_batches = train_dataset.num_examples // batch_size
+
+        # Setup callback manager
+        callback_manager = self._setup_callback_manager(
+            epochs=epochs, batch_size=batch_size,
+            validation_dataset=validation_dataset)
+        callback_manager.setup()
+        callback_manager.on_train_begin()
+
+        # At the start of training, train both
+        # discriminator and generator for at least one batch
+        discriminative_power = None
+
+        for epoch in range(epochs):
+            # Begin epoch
+            callback_manager.on_epoch_begin(epoch)
+
+            # Initialize logs to non-empty dictionaries (hence 'name' key)
+            comb_epoch_logs = {"name": "z_combined"}
+            disc_epoch_logs = {"name": "z_discriminator"}
+
+            # Shuffle dataset
+            train_dataset.shuffle()
+
+            trained_disc = False
+            trained_combined = False
+            for batch in range(n_batches):
+                # Begin batch
+                comb_batch_logs = {"batch": batch, "size": batch_size}
+                disc_batch_logs = {"batch": batch, "size": batch_size}
+                log_string = "Batch {}/{} - ".format(batch + 1, n_batches)
+
+                # Get next batch of samples
+                x, _ = train_dataset.next_batch(batch_size)
+
+                if discriminative_power is None or \
+                        discriminative_power >= self.discriminative_power:
+                    # Train generator (combined model)
+                    callback_manager.on_batch_begin(
+                        batch, comb_batch_logs, model_name="z_combined")
+                    total_loss, ae_loss, adv_loss, disc_error = \
+                        self.z_combined_model.train_on_batch(x, {
+                            "reconstructions": x,
+                            "discriminator_model": np.array([0.0] * batch_size)
+                        })
+                    discriminative_power = 1.0 - disc_error
+                    log_string += "|Recon. Loss: {:f}".format(ae_loss)
+                    log_string += "|Adv. Loss: {:f}".format(adv_loss)
+                    comb_batch_logs["loss"] = total_loss
+                    comb_batch_logs["ae_loss"] = ae_loss
+                    comb_batch_logs["adv_loss"] = adv_loss
+
+                    callback_manager.on_batch_end(
+                        batch, comb_batch_logs, model_name="z_combined")
+                    if callback_manager.stop_training:
+                        break
+
+                    trained_combined = True
+
+                if discriminative_power is None or \
+                        discriminative_power < self.discriminative_power:
+                    # 2A) Train discriminator
+                    callback_manager.on_batch_begin(
+                        batch, disc_batch_logs, model_name="z_discriminator")
+                    z_prior = self.z_prior_dist.sample(batch_size)
+                    z_posterior = self.encoder_model.predict(x)
+                    d_loss_prior, _ = self.z_discriminator_model.train_on_batch(
+                        z_prior, [0.0] * batch_size)
+                    d_loss_posterior, d_acc_posterior = \
+                        self.z_discriminator_model.train_on_batch(
+                            z_posterior, [1.0] * batch_size)
+                    d_loss = d_loss_prior + d_loss_posterior
+                    discriminative_power = d_acc_posterior
+                    log_string += "|Disc Loss: {:f}".format(d_loss)
+                    disc_batch_logs["loss"] = d_loss
+                    disc_batch_logs["loss_prior"] = d_loss_prior
+                    disc_batch_logs["loss_posterior"] = d_loss_posterior
+                    callback_manager.on_batch_end(
+                        batch, disc_batch_logs, model_name="z_discriminator")
+                    if callback_manager.stop_training:
+                        break
+
+                    trained_disc = True
+
+                log_string += "|Disc. Power: {:f}".format(discriminative_power)
+
+                if verbose == 2:
+                    print(log_string)
+
+            if not trained_disc:
+                z_prior = self.z_prior_dist.sample(train_dataset.num_examples)
+                z_posterior = self.encoder_model.predict(
+                    train_dataset.features)
+                d_loss_prior, _ = self.z_discriminator_model.evaluate(
+                    z_prior, np.array([0.0] * train_dataset.num_examples),
+                    verbose=0)
+                d_loss_posterior, d_acc_posterior = \
+                    self.z_discriminator_model.evaluate(
+                        z_posterior,
+                        np.array([1.0] * train_dataset.num_examples),
+                        verbose=0)
+                d_loss = d_loss_prior + d_loss_posterior
+                disc_epoch_logs["loss"] = d_loss
+                discriminative_power = d_acc_posterior
+
+            if not trained_combined:
+                total_loss, ae_loss, adv_loss, d_error = \
+                    self.z_combined_model.evaluate(
+                        train_dataset.features, {
+                            "reconstructions": train_dataset.features,
+                            "discriminator_model":
+                                np.array([0.0] * train_dataset.num_examples)
+                        }, verbose=0)
+                comb_epoch_logs["loss"] = total_loss
+                comb_epoch_logs["ae_loss"] = ae_loss
+                comb_epoch_logs["adv_loss"] = adv_loss
+                discriminative_power = 1.0 - d_error
+
+            # Validation step
+            if do_validation:
+                val_losses = self.evaluate(
+                    validation_dataset, batch_size=batch_size)
+                comb_epoch_logs["val_loss"] = val_losses["ae_loss"]
+                disc_epoch_logs["val_loss"] = val_losses["z_disc_loss"]
+
+            callback_manager.on_epoch_end(
+                epoch, disc_epoch_logs, model_name="z_discriminator")
+            callback_manager.on_epoch_end(
+                epoch, comb_epoch_logs, model_name="z_combined")
+            if callback_manager.stop_training:
+                break
+
+            if verbose >= 1:
+                print("Epoch {}/{} - Combined Loss: {:f}|Disc Loss: {:f}"
+                      "|Disc. Power {:f}"
+                      .format(epoch + 1, epochs, comb_epoch_logs["loss"],
+                              disc_epoch_logs["loss"], discriminative_power))
+        callback_manager.on_train_end()
+        return {k: v.callbacks[-1]
+                for k, v in callback_manager.callback_lists.items()}
+
+    def evaluate(self, test_dataset, batch_size=100):
+        x = test_dataset.features
+
+        comb_loss, ae_loss, adv_loss, d_error = \
+            self.z_combined_model.evaluate(
+                x, {
+                    "reconstructions": x,
+                    "discriminator_model": np.array(
+                        [0.0] * test_dataset.num_examples)
+                }, verbose=0)
+
+        z_prior = self.z_prior_dist.sample(len(x))
+        z_posterior = self.encoder_model.predict(x)
+        d_loss_prior, d_acc_prior = self.z_discriminator_model.evaluate(
+            z_prior, [0.0] * len(z_prior), batch_size=batch_size, verbose=0)
+        d_loss_posterior, d_acc_posterior = \
+            self.z_discriminator_model.evaluate(
+                z_posterior, [1.0] * len(z_posterior),
+                batch_size=batch_size, verbose=0)
+        d_loss = d_loss_prior + d_loss_posterior
+
+        total_loss = ae_loss + d_loss + adv_loss
+
+        return {
+            "ae_loss": ae_loss,
+            "z_disc_loss": d_loss,
+            "z_adv_loss": adv_loss,
+            "z_disc_loss_prior": d_loss_prior,
+            "z_disc_loss_posterior": d_loss_posterior,
+            "z_disc_acc_prior": d_acc_prior,
+            "z_disc_acc_posterior": d_acc_posterior,
+            "loss": total_loss
+        }
+
+
+class UnsupervisedClusteringAdversarialAutoencoder(AdversarialAutoencoder):
+    def __init__(self, config, restore=False):
+        self.y_latent_dist = None
+        self.y_prior_dist = None
+
+        self.y_discriminator_model = None
+        self.y_adversarial_model = None
+
+        self.y_disc_optimizer = None
+
+        super(UnsupervisedClusteringAdversarialAutoencoder, self).__init__(
+            config, restore=restore)
+
+    def setup(self):
+        super(UnsupervisedClusteringAdversarialAutoencoder, self).setup()
+
+        if "n_clusters" not in self.config:
+            raise Exception("Must specify number of clusters for an "
+                            "unsupervised clustering adversarial autoencoder")
+        else:
+            n_clusters = self.config["n_clusters"]
+            self.y_prior_dist = Categorical(n_clusters)
+            self.y_latent_dist = Categorical(n_clusters)
+
+        if "y_discriminator_optimizer" in self.config:
+            self.y_disc_optimizer = \
+                DefinitionParser.parse_optimizer_definition(
+                    self.config["y_discriminator_optimizer"])
+        else:
+            self.y_disc_optimizer = self.z_disc_optimizer
+
+    def build(self):
+        latent_space = self._build_stochastic_encoder(
+            self.z_latent_dist, self.y_latent_dist)
+        z_latent_space, y_latent_space = latent_space[0], latent_space[1]
+        self.encoder_model = Model(self.x, latent_space)
+        encoder_model_z = Model(self.x, z_latent_space)
+        encoder_model_y = Model(self.x, y_latent_space)
+
+        decoder_input = Concatenate()([z_latent_space, y_latent_space])
+        self.reconstructions = self._build_stochastic_decoder(
+            decoder_input, self.output_dist)
+
+        self.autoencoder_model = Model(self.x, self.reconstructions)
+        self.z_discriminator_model = self._build_discriminator_z(z_latent_space)
+        self.y_discriminator_model = self._build_discriminator_y(y_latent_space)
+
+        self.add_saveable_model("autoencoder", self.autoencoder_model)
+        self.add_saveable_model("z_discriminator", self.z_discriminator_model)
+        self.add_saveable_model("y_discriminator", self.y_discriminator_model)
+
+        self.z_adversarial_model = Model(
+            self.x, self.z_discriminator_model(encoder_model_z(self.x)))
+        self.y_adversarial_model = Model(
+            self.x, self.y_discriminator_model(encoder_model_y(self.x)))
+
+        self.z_discriminator_model.compile(optimizer=self.z_disc_optimizer,
+                                           loss="binary_crossentropy")
+        self.y_discriminator_model.compile(optimizer=self.y_disc_optimizer,
+                                           loss="binary_crossentropy")
+        self.autoencoder_model.compile(optimizer=self.ae_optimizer,
+                                       loss=self.reconstruction_loss)
+
+        # Freeze the discriminator models when training
+        # the adversarial networks
+        self.z_discriminator_model.trainable = False
+        self.z_adversarial_model.compile(optimizer=self.z_disc_optimizer,
+                                         loss="binary_crossentropy")
+        self.y_discriminator_model.trainable = False
+        self.y_adversarial_model.compile(optimizer=self.y_disc_optimizer,
+                                         loss="binary_crossentropy")
+
+    def _build_discriminator_z(self, z_latent_space):
+        return self._build_discriminator(z_latent_space)
+
+    def _build_discriminator_y(self, y_latent_space):
+        if "y_discriminator_layers" not in self.config:
+            return self._build_discriminator(y_latent_space)
+        else:
+            return self._build_discriminator(
+                y_latent_space, self.config["y_discriminator_layers"])
+
+    def _setup_callback_manager(self, **train_params):
+        do_validation = "validation_dataset" in train_params and \
+                        train_params["validation_dataset"] is not None
+
+        model_names = ["autoencoder", "z_discriminator", "z_adversarial",
+                       "y_discriminator", "y_adversarial"]
+
+        callback_manager_params = {
+            "epochs": train_params["epochs"],
+            "batch_size": train_params["batch_size"],
+            "models": dict(zip(model_names, [
+                self.autoencoder_model,
+                self.z_discriminator_model,
+                self.z_adversarial_model,
+                self.y_discriminator_model,
+                self.y_adversarial_model
+            ]))
+        }
+
+        if do_validation:
+            callback_manager_params["do_validation"] = ["autoencoder"]
+            callback_manager_params["validation_data"] = (
+                train_params["validation_dataset"].features,
+                train_params["validation_dataset"].features
+            )
+
+        callback_manager = CallbackManager(**callback_manager_params)
+
+        # Add any additional callbacks for each model
+        for name in model_names:
+            key = "{}_callbacks".format(name)
+            if key in self.config and isinstance(self.config[key], dict):
+                callback_manager.add_callbacks(
+                    name, self.setup_callbacks(self.config[key]))
+
+        return callback_manager
+
+    def train(self, train_dataset,
+              epochs=100, batch_size=100, validation_dataset=None,
+              verbose=1):
+        do_validation = validation_dataset is not None
+        n_batches = train_dataset.num_examples // batch_size
+
+        callback_manager = self._setup_callback_manager(
+            epochs=epochs, batch_size=batch_size,
+            validation_dataset=validation_dataset)
+        callback_manager.setup()
+        callback_manager.on_train_begin()
+
+        for epoch in range(epochs):
+            # Begin epoch
+            callback_manager.on_epoch_begin(epoch)
+
+            # Initialize logs to non-empty dictionaries
+            ae_epoch_logs = {"name": "autoencoder"}
+            z_disc_epoch_logs = {"name": "z_discriminator"}
+            z_adv_epoch_logs = {"name": "z_adversarial"}
+            y_disc_epoch_logs = {"name": "y_discriminator"}
+            y_adv_epoch_logs = {"name": "y_adversarial"}
+
+            train_dataset.shuffle()
+            for batch in range(n_batches):
+                ae_batch_logs = {"batch": batch, "size": batch_size}
+                z_disc_batch_logs = {"batch": batch, "size": batch_size}
+                z_adv_batch_logs = {"batch": batch, "size": batch_size}
+                y_disc_batch_logs = {"batch": batch, "size": batch_size}
+                y_adv_batch_logs = {"batch": batch, "size": batch_size}
+
+                # Get next batch of samples
+                x, _ = train_dataset.next_batch(batch_size)
+
+                # --------------------
+                # Reconstruction Phase
+                # --------------------
+                callback_manager.on_batch_begin(
+                    batch, ae_batch_logs, model_name="autoencoder")
                 reconstruction_loss = \
                     self.autoencoder_model.train_on_batch(x, x)
                 ae_batch_logs["loss"] = reconstruction_loss
@@ -507,69 +1008,163 @@ class AdversarialAutoencoder(GenerativeAutoencoder, DeepAutoencoder):
                 if callback_manager.stop_training:
                     break
 
-                # 2. Regularization Phase
-                # 2a. Train discriminator
-                z_posterior = self.encoder_model.predict(x)
-                z_prior = np.random.standard_normal(
-                    (batch_size, self.latent_size))
+                # --------------------
+                # Regularization Phase
+                # --------------------
 
-                d_loss_prior = self.discriminator_model.train_on_batch(
+                # Regularize q(z|x)
+                callback_manager.on_batch_begin(
+                    batch, z_disc_batch_logs, model_name="z_discriminator")
+
+                z_prior = self.z_prior_dist.sample(batch_size)
+                z_posterior = self.encoder_model.predict(x)[0]
+
+                z_d_loss_prior = self.z_discriminator_model.train_on_batch(
                     z_prior, [0.0] * batch_size)
-                d_loss_posterior = self.discriminator_model.train_on_batch(
+                z_d_loss_posterior = self.z_discriminator_model.train_on_batch(
                     z_posterior, [1.0] * batch_size)
-                d_loss = d_loss_prior + d_loss_posterior
+                z_d_loss = z_d_loss_prior + z_d_loss_posterior
 
-                disc_batch_logs["loss"] = d_loss
+                z_disc_batch_logs["loss"] = z_d_loss
+                z_disc_batch_logs["loss_prior"] = z_d_loss_prior
+                z_disc_batch_logs["loss_posterior"] = z_d_loss_posterior
                 callback_manager.on_batch_end(
-                    batch, disc_batch_logs, model_name="discriminator")
+                    batch, z_disc_batch_logs, model_name="z_discriminator")
                 if callback_manager.stop_training:
                     break
 
-                # 2b. Train encoder ("generator" of latent space)
-                adversarial_loss = self.adversarial_model.train_on_batch(
+                # Regularize q(y|x)
+                callback_manager.on_batch_begin(
+                    batch, y_disc_batch_logs, model_name="y_discriminator")
+
+                y_prior = self.y_prior_dist.sample(batch_size)
+                y_posterior = self.encoder_model.predict(x)[1]
+
+                y_d_loss_prior = self.y_discriminator_model.train_on_batch(
+                    y_prior, [0.0] * batch_size)
+                y_d_loss_posterior = self.y_discriminator_model.train_on_batch(
+                    y_posterior, [1.0] * batch_size)
+                y_d_loss = y_d_loss_prior + y_d_loss_posterior
+
+                y_disc_batch_logs["loss"] = y_d_loss
+                y_disc_batch_logs["loss_prior"] = y_d_loss_prior
+                y_disc_batch_logs["loss_posterior"] = y_d_loss_posterior
+                callback_manager.on_batch_end(
+                    batch, y_disc_batch_logs, model_name="y_discriminator")
+                if callback_manager.stop_training:
+                    break
+
+                # Train encoder q(z|x)
+                callback_manager.on_batch_begin(
+                    batch, z_adv_batch_logs, model_name="z_adversarial")
+
+                z_adv_loss = self.z_adversarial_model.train_on_batch(
                     x, [0.0] * batch_size)
+                z_adv_batch_logs["loss"] = z_adv_loss
+                callback_manager.on_batch_end(
+                    batch, z_adv_batch_logs, model_name="z_adversarial")
+                if callback_manager.stop_training:
+                    break
 
-                print("\nBatch {}/{} - Recon. Loss: {:f}|Disc. Loss: {:f}"
-                      .format(batch + 1, n_batches,
-                              reconstruction_loss, d_loss))
+                # Train encoder q(y|x)
+                callback_manager.on_batch_begin(
+                    batch, y_adv_batch_logs, model_name="y_adversarial")
 
+                y_adv_loss = self.y_adversarial_model.train_on_batch(
+                    x, [0.0] * batch_size)
+                y_adv_batch_logs["loss"] = y_adv_loss
+                callback_manager.on_batch_end(
+                    batch, y_adv_batch_logs, model_name="y_adversarial")
+                if callback_manager.stop_training:
+                    break
+
+                if verbose == 2:
+                    print("Batch {}/{} - Recon Loss: {:f}|"
+                          "Z Disc Loss: {:f}|Z Adv Loss: {:f}|"
+                          "Y Disc Loss: {:f}|Y Adv Loss: {:f}"
+                          .format(batch + 1, n_batches, reconstruction_loss,
+                                  z_d_loss, z_adv_loss, y_d_loss, y_adv_loss))
+
+            # Validation step
             if do_validation:
-                x_valid = validation_dataset.features
-                val_recon_loss = self.autoencoder_model.evaluate(
-                    x_valid, x_valid, batch_size=batch_size)
-
-                val_z_prior = np.random.standard_normal((
-                    len(x_valid), self.latent_size))
-                val_z_posterior = self.encoder_model.predict(
-                    x_valid, batch_size=batch_size)
-
-                val_d_loss_prior = self.discriminator_model.evaluate(
-                    val_z_prior, [0.0] * len(val_z_prior),
-                    batch_size=batch_size)
-                val_d_loss_posterior = self.discriminator_model.evaluate(
-                    val_z_posterior, [1.0] * len(val_z_posterior),
-                    batch_size=batch_size)
-                val_d_loss = val_d_loss_prior + val_d_loss_posterior
-
-                val_adversarial_loss = self.adversarial_model.evaluate(
-                    x_valid, np.zeros(len(x_valid)))
-
-                ae_epoch_logs["val_loss"] = val_recon_loss
-                disc_epoch_logs["val_loss"] = val_d_loss
+                val_losses = self.evaluate(
+                    validation_dataset, batch_size=batch_size)
+                ae_epoch_logs["val_loss"] = val_losses["ae_loss"]
+                z_disc_epoch_logs["val_loss"] = val_losses["z_disc_loss"]
+                z_adv_epoch_logs["val_loss"] = val_losses["z_adv_loss"]
+                y_disc_epoch_logs["val_loss"] = val_losses["y_disc_loss"]
+                y_adv_epoch_logs["val_loss"] = val_losses["y_adv_loss"]
 
             callback_manager.on_epoch_end(
                 epoch, ae_epoch_logs, model_name="autoencoder")
             callback_manager.on_epoch_end(
-                epoch, disc_epoch_logs, model_name="discriminator")
-
+                epoch, z_disc_epoch_logs, model_name="z_discriminator")
+            callback_manager.on_epoch_end(
+                epoch, z_adv_epoch_logs, model_name="z_adversarial")
+            callback_manager.on_epoch_end(
+                epoch, y_disc_epoch_logs, model_name="y_discriminator")
+            callback_manager.on_epoch_end(
+                epoch, y_adv_epoch_logs, model_name="y_adversarial")
             if callback_manager.stop_training:
                 break
 
-            print("\nEpoch {}/{} - Recon. Loss: {:f}|Disc. Loss: {:f}"
-                  .format(epoch + 1, epochs,
-                          ae_epoch_logs["loss"],
-                          disc_epoch_logs["loss"]))
-
+            if verbose >= 1:
+                print("Epoch {}/{} - Recon Loss: {:f}|"
+                      "Z Disc Loss: {:f}|Z Adv Loss: {:f}|"
+                      "Y Disc Loss: {:f}|Y Adv loss: {:f}"
+                      .format(epoch + 1, epochs,
+                              ae_epoch_logs["loss"],
+                              z_disc_epoch_logs["loss"],
+                              z_adv_epoch_logs["loss"],
+                              y_disc_epoch_logs["loss"],
+                              y_adv_epoch_logs["loss"]))
         callback_manager.on_train_end()
-        return [l[-1] for l in callback_manager.callback_lists]
+        return {k: v.callbacks[-1]
+                for k, v in callback_manager.callback_lists.items()}
 
+    def evaluate(self, test_dataset, batch_size=100):
+        x = test_dataset.features
+
+        ae_loss = self.autoencoder_model.evaluate(
+            x, x, batch_size=batch_size, verbose=0)
+
+        z_prior = self.z_prior_dist.sample(len(x))
+        z_posterior = self.encoder_model.predict(x)[0]
+        z_d_loss_prior = self.z_discriminator_model.evaluate(
+            z_prior, [0.0] * len(z_prior), batch_size=batch_size, verbose=0)
+        z_d_loss_posterior = self.z_discriminator_model.evaluate(
+            z_posterior, [1.0] * len(z_posterior),
+            batch_size=batch_size, verbose=0)
+        z_d_loss = z_d_loss_prior + z_d_loss_posterior
+        z_adv_loss = self.z_adversarial_model.evaluate(
+            x, [0.0] * len(x), batch_size=batch_size, verbose=0)
+
+        y_prior = self.y_prior_dist.sample(len(x))
+        y_posterior = self.encoder_model.predict(x)[1]
+        y_d_loss_prior = self.y_discriminator_model.evaluate(
+            y_prior, [0.0] * len(y_prior), batch_size=batch_size, verbose=0)
+        y_d_loss_posterior = self.y_discriminator_model.evaluate(
+            y_posterior, [1.0] * len(y_posterior),
+            batch_size=batch_size, verbose=0)
+        y_d_loss = y_d_loss_prior + y_d_loss_posterior
+        y_adv_loss = self.y_adversarial_model.evaluate(
+            x, [0.0] * len(x), batch_size=batch_size, verbose=0)
+
+        total_loss = ae_loss + z_d_loss + z_adv_loss + y_d_loss + y_adv_loss
+
+        return {
+            "ae_loss": ae_loss,
+            "z_disc_loss": z_d_loss,
+            "z_adv_loss": z_adv_loss,
+            "z_disc_loss_prior": z_d_loss_prior,
+            "z_disc_loss_posterior": z_d_loss_posterior,
+            "y_disc_loss": y_d_loss,
+            "y_adv_loss": y_adv_loss,
+            "y_disc_loss_prior": y_d_loss_prior,
+            "y_disc_loss_posterior": y_d_loss_posterior,
+            "loss": total_loss
+        }
+
+    def cluster(self, x, batch_size=100):
+        return np.argmax(self.encoder_model.predict(
+            x, batch_size=batch_size, verbose=0)[1], axis=-1)

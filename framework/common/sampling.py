@@ -66,11 +66,11 @@ def stratified_sample(features,
         for i in range(len(proportions)):
             fold_idx = fold_indexes[i]
 
-            folds[i]["features"] += stratum_features[fold_idx,].tolist()
-            folds[i]["labels"] += stratum_labels[fold_idx,].tolist()
+            folds[i]["features"] += stratum_features[fold_idx].tolist()
+            folds[i]["labels"] += stratum_labels[fold_idx].tolist()
 
             for d_idx, d in enumerate(stratum_sample_data):
-                folds[i]["sample_data"][d_idx] += d[fold_idx,].tolist()
+                folds[i]["sample_data"][d_idx] += d[fold_idx].tolist()
 
     datasets = []
     for i, fold in enumerate(folds):
@@ -83,13 +83,50 @@ def stratified_sample(features,
 
     return datasets
 
+
 def stratified_kfold(
         features, 
         labels,
-        sample_data=[],
+        sample_data=None,
         n_folds=10,
         convert_labels_to_int=False):
     proportions = [1.0 / n_folds] * n_folds
     return stratified_sample(
         features, labels, sample_data=sample_data,
         proportions=proportions, convert_labels_to_int=convert_labels_to_int)
+
+
+def kfold(features, sample_data=None, n_folds=10):
+    if sample_data is None:
+        sample_data = []
+
+    proportions = [1.0 / n_folds] * n_folds
+
+    # Randomize dataset
+    features, sample_data = \
+        unpack_tuple(shuffle_in_unison(features, *sample_data), 1)
+
+    fold_indexes = percentage_split(np.arange(features.shape[0]), proportions)
+    folds = []
+    for i in range(len(proportions)):
+        folds.append({"features": []})
+        if len(sample_data) > 0:
+            folds[-1]["sample_data"] = []
+
+    for i in range(len(proportions)):
+        fold_idx = fold_indexes[i]
+
+        folds[i]["features"] += features[fold_idx].tolist()
+
+        for d in sample_data:
+            folds[i]["sample_data"].append(d[fold_idx].tolist())
+
+    datasets = []
+    for i, fold in enumerate(folds):
+        dataset = Dataset(
+            np.array(fold["features"]),
+            np.array(fold["features"]),
+            sample_data=fold["sample_data"])
+        datasets.append(dataset)
+
+    return datasets

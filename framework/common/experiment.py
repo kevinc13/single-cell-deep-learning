@@ -5,6 +5,7 @@ from __future__ import (
 import logging
 import os
 import sys
+from functools import partial
 
 import numpy as np
 from collections import Iterable
@@ -85,9 +86,25 @@ class HyperoptExperiment(BaseExperiment):
     def run_hyperopt(self, objective_func):
         trials = Trials()
         search_space = self.hyperopt_search_space()
+
+        alg = partial(
+            tpe.suggest,
+
+            # Sample 100 candidates and select candidate that
+            # has highest Expected Improvement (EI)
+            n_EI_candidates=100,
+
+            # Use 25% of best observations to estimate next
+            # set of parameters
+            gamma=0.25,
+
+            # First 20 trials are going to be random
+            n_startup_jobs=20,
+        )
+
         best = fmin(objective_func,
                     space=search_space,
-                    algo=tpe.suggest,
+                    algo=alg,
                     max_evals=self.n_evals,
                     trials=trials)
         return trials, best, space_eval(search_space, best)
@@ -146,12 +163,10 @@ class CrossValidationExperiment(BaseExperiment):
                         batch_size=batch_size,
                         validation_dataset=valid_dataset)
 
-            eval_metrics = model.evaluate(valid_dataset)
-            if not isinstance(eval_metrics, Iterable):
-                eval_metrics = [eval_metrics]
-
-            fold_valid_metrics = dict(zip(model.autoencoder_model.metrics_names,
-                                          eval_metrics))
+            fold_valid_metrics = model.evaluate(valid_dataset)
+            if not isinstance(fold_valid_metrics, dict):
+                raise TypeError("Evaluate method of model must return a "
+                                "dictionary of metric names and values")
 
             if np.any(np.isnan(list(fold_valid_metrics.values()))) or \
                     np.any(np.isinf(list(fold_valid_metrics.values()))):
@@ -209,17 +224,12 @@ class CrossValidationExperiment(BaseExperiment):
                 model_config["name"]))
 
         model = self.model_class(model_config)
-        if self.debug: self.epochs = 2
-        model.train(full_dataset, epochs=self.epochs,
-                    batch_size=batch_size)
+        if self.debug:
+            self.epochs = 2
+        train_history = model.train(full_dataset, epochs=self.epochs,
+                                    batch_size=batch_size)
 
-        eval_metrics = model.evaluate(full_dataset)
-        if not isinstance(eval_metrics, Iterable):
-            eval_metrics = [eval_metrics]
-
-        metrics = dict(zip(model.autoencoder_model.metrics_names,
-                           eval_metrics))
-
+        metrics = model.evaluate(full_dataset)
         if self.logger is not None:
             for k, v in metrics.items():
                 self.logger.info("{}|{} = {:f}".format(
@@ -228,6 +238,7 @@ class CrossValidationExperiment(BaseExperiment):
 
         return {
             "model": model,
+            "train_history": train_history,
             "dataset": full_dataset,
             "metrics": metrics
         }

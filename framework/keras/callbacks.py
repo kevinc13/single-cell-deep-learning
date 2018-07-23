@@ -44,10 +44,7 @@ class CallbackManager:
     def setup(self):
         if not self.is_setup:
             for model_name, model in self.models.items():
-                if model_name in self.callbacks:
-                    callback_list = self.get_callback_list(model_name)
-                else:
-                    callback_list = self.get_callback_list(model)
+                callback_list = self.setup_callback_list(model_name)
                 model.stop_training = False
 
                 if model_name in self.do_validation:
@@ -59,7 +56,7 @@ class CallbackManager:
 
             self.is_setup = True
 
-    def get_callback_list(self, model_name):
+    def setup_callback_list(self, model_name):
         if model_name in self.callback_lists:
             return self.callback_lists[model_name]
 
@@ -114,7 +111,6 @@ class CallbackManager:
             raise Exception("Callback lists have not been setup yet")
 
         logs = logs or {}
-
         if model_name is not None:
             self.callback_lists[model_name].on_epoch_begin(epoch, logs)
         else:
@@ -218,6 +214,26 @@ class TerminateOnNaN(Callback):
     def on_epoch_end(self, epoch, logs=None):
         if self.stop_training:
             print("Epoch %d: Invalid loss, terminating training" % epoch)
+            self.model.stop_training = True
+
+
+class TerminateOnExplodingMetric(Callback):
+    def __init__(self, metric="loss", threshold=10000):
+        super(TerminateOnExplodingMetric, self).__init__()
+        self.metric = metric
+        self.threshold = threshold
+        self.stop_training = False
+
+    def on_batch_end(self, batch, logs=None):
+        logs = logs or {}
+        if self.metric in logs:
+            if logs[self.metric] > self.threshold:
+                self.stop_training = True
+
+    def on_epoch_end(self, epoch, logs=None):
+        if self.stop_training:
+            print("Epoch {}: Exploding metric '{}', "
+                  "terminating training".format(epoch, self.metric))
             self.model.stop_training = True
 
 

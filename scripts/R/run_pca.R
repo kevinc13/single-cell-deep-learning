@@ -1,43 +1,39 @@
-library(scater)
+# ------------------------------------------------------------------------------
+# This script runs PCA and saves the reduced dimensional representations
+# ------------------------------------------------------------------------------
+base.dir <- "~/Documents/Research/XinghuaLuLab/single-cell-deep-learning"
+setwd(base.dir)
+
 library(data.table)
+library(scater)
 
-# ---------- Load Helper Files ---------- #
-setwd("~/Documents/Research/XinghuaLuLab/single-cell-deep-learning/scripts/benchmark-vae")
-source("consensus_clustering.R")
-source("tsne.R")
+# Configuration ----------------------------------------------------------------
+dataset.file <- "data/GSE57872_GBM/processed/gbm.1000g.centered.SCESet.rds"
+pca.ntop <- 1000
+pca.ncomponents <- 10
+pca.output.dir <- "results/gbm/pca/pca_1000g_10comp"
 
-setwd("~/Documents/Research/XinghuaLuLab/single-cell-deep-learning")
+dataset.label.cols <- c("cell_origin")
+output.label.cols <- c("tumor_id")
 
-# ---------- Run PCA ---------- #
-usokin <- readRDS("data/Usokin/original/mouse_neuronal_cells.rds")
-usokin.pca <- plotPCA(usokin, ncomponents=10,
-                      colour_by="pca_major_types",
-                      return_SCESet = TRUE,
-                      scale_features=TRUE,
-                      draw_plot=FALSE)
+# Run PCA ----------------------------------------------------------------------
+dataset <- readRDS(dataset.file)
+dataset.pca <- plotPCA(dataset, ncomponents=pca.ncomponents,
+                       return_SCESet = TRUE, scale_features=TRUE,
+                       draw_plot=FALSE, ntop=pca.ntop)
 
-latent_reps <- reducedDimension(usokin.pca)
-cell_types <- usokin$pca_major_types
-cell_subtypes <- usokin$pca_all_neuronal_subtypes
+latent.reps <- as.data.frame(reducedDimension(dataset.pca))
 
-params <- c("km_euclidean", "pam_euclidean", "pam_pearson")
+# Save PCA Latent Representations ----------------------------------------------
+df <- cbind(rownames(latent.reps), latent.reps, 
+            pData(dataset)[dataset.label.cols])
+colnames(df)[1] <- "cell_id"
+colnames(df)[(pca.ncomponents + 2):ncol(df)] <- output.label.cols
 
-clust_results_df <- data.frame()
-for (param in params) {
-    alg <- strsplit(param, "_")[[1]][1]
-    dist <- strsplit(param, "_")[[1]][2]
-    
-    clust <- cluster_latent_reps(latent_reps, cell_types,
-                                 "results/usokin_pca", 4, force_opt_k=4,
-                                 clusterAlg=alg, dist=dist,
-                                 plot=TRUE)
-    
-    row <- data.frame("opt_k"=clust$opt_k,
-                      "pac_opt_k"=clust$pac[
-                          paste("k", clust$opt_k, sep="")],
-                      "pac_k4"=clust$pac["k4"],
-                      "ari_k4"=clust$ari,
-                      "acc_k4"=clust$acc)
-    rownames(row) <- param
-    clust_results_df <- rbind(clust_results_df, row)
-}
+dir.create(pca.output.dir, showWarnings=FALSE)
+
+write.table(df, file=paste(pca.output.dir, 
+                           "/latent_representations.txt", sep=""),
+            row.names=FALSE, col.names=TRUE, sep="\t", quote=FALSE)
+
+
