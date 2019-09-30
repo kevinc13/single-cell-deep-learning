@@ -4,8 +4,6 @@ from __future__ import (absolute_import, division, print_function,
 import copy
 from functools import reduce
 from operator import mul
-
-import keras.backend as K
 import numpy as np
 from keras.callbacks import LambdaCallback
 from keras.layers import Concatenate, Dense, Input

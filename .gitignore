@@ -25,6 +25,7 @@ data/**/.Rhistory
 data/**/.DS_Store
 
 # Ignore results and slurm logs
+docs/*
 results/*
 slurm/archive/
 *.out
